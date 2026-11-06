@@ -223,4 +223,8 @@ __marimo__/
 .venv/
 data/raw/
 *.duckdb
-.env
+.envdbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/.user.yml
+.vscode/
