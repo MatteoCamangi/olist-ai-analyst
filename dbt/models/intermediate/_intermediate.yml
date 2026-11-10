@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: int_orders_enriched
+    description: One row per order with the status, dates and customer location that both facts share. Not for direct querying.
+    columns:
+      - name: order_id
+        description: Identifier of the order. One row per order.
+        data_tests:
+          - unique
+      - name: customer_id
+        description: "{{ doc('customer_id') }}"
+      - name: customer_unique_id
+        description: "{{ doc('customer_unique_id') }}"
+      - name: order_purchase_timestamp
+        description: Timestamp when the order was placed.
+      - name: order_purchase_day
+        description: "{{ doc('order_purchase_day') }}"
+      - name: order_purchase_week
+        description: "{{ doc('order_purchase_week') }}"
+      - name: order_purchase_month
+        description: "{{ doc('order_purchase_month') }}"
+      - name: order_status
+        description: "{{ doc('order_status') }}"
+      - name: order_status_group
+        description: "{{ doc('order_status_group') }}"
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['delivered', 'in_flight', 'canceled', 'unavailable']
+      - name: is_delivered
+        description: "{{ doc('is_delivered') }}"
+      - name: customer_state
+        description: "{{ doc('customer_state') }}"
+      - name: customer_city
+        description: "{{ doc('customer_city') }}"
