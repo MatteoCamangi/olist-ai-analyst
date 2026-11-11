@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: One row per person (customer_unique_id) with at least one delivered order. Holds person-level behavior for repeat purchase questions. It has no location columns, because a person can appear in several states.
+    columns:
+      - name: customer_unique_id
+        description: "{{ doc('customer_unique_id') }}"  # defined in intermediate/_intermediate__docs.md
+        data_tests:
+          - unique
+      - name: first_order_day
+        description: "{{ doc('first_order_day') }}"
+      - name: delivered_orders_count
+        description: Number of delivered orders of the person. Orders on the same day count separately.
+      - name: first_order_review_score
+        description: "{{ doc('first_order_review_score') }}"
+      - name: is_repeat_customer
+        description: "{{ doc('is_repeat_customer') }}"
+      - name: is_repeat_customer_180d
+        description: "{{ doc('is_repeat_customer_180d') }}"
+
+  - name: dim_products
+    description: One row per product (32,951) with its category. Holds the category rule, so no other model recomputes it. Weight and size are not included because no metric uses them.
+    columns:
+      - name: product_id
+        description: Identifier of the product (an anonymized hash). The data has no product names.
+        data_tests:
+          - unique
+      - name: product_category_name_pt
+        description: "{{ doc('product_category_name_pt') }}"
+        data_tests:
+          - not_null
+      - name: product_category_name_en
+        description: "{{ doc('product_category_name_en') }}"
+        data_tests:
+          - not_null
