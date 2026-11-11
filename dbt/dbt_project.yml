@@ -7,6 +7,9 @@ model-paths: ["models"]
 macro-paths: ["macros"]
 test-paths: ["tests"]
 
+vars:
+  as_of_date: '2018-08-21'
+
 models:
   olist_analytics:
     staging:

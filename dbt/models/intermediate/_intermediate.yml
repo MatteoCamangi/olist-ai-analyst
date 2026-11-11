@@ -5,7 +5,7 @@ models:
     description: One row per order with the status, dates and customer location that both facts share. Not for direct querying.
     columns:
       - name: order_id
-        description: Identifier of the order. One row per order.
+        description: "{{ doc('order_id') }}"
         data_tests:
           - unique
       - name: customer_id
@@ -15,11 +15,11 @@ models:
       - name: order_purchase_timestamp
         description: Timestamp when the order was placed.
       - name: order_purchase_day
-        description: "{{ doc('order_purchase_day') }}"
+        description: Calendar day of the purchase timestamp, as a date.
       - name: order_purchase_week
-        description: "{{ doc('order_purchase_week') }}"
+        description: Weeks run Monday to Sunday. Only complete weeks inside the analysis window are reported.
       - name: order_purchase_month
-        description: "{{ doc('order_purchase_month') }}"
+        description: First day of the month of the purchase timestamp, as a date.
       - name: order_status
         description: "{{ doc('order_status') }}"
       - name: order_status_group
@@ -32,6 +32,19 @@ models:
       - name: is_delivered
         description: "{{ doc('is_delivered') }}"
       - name: customer_state
-        description: "{{ doc('customer_state') }}"
+        description: Brazilian state (27 values) of the order's customer record. Location always comes from the order, not from the person.
       - name: customer_city
-        description: "{{ doc('customer_city') }}"
+        description: City of the order's customer record, lowercase and without accents (for example `sao paulo`). The same city name exists in several states, so always use it together with `customer_state`.
+
+
+  - name: int_orders_latest_reviews
+    description: One row per order that has at least one review, with the score of its latest review. Orders without a review are absent (768), so left join it and keep a null score. Not for direct querying.
+    columns:
+      - name: order_id
+        description: "{{ doc('order_id') }}"
+        data_tests:
+          - unique
+      - name: review_id
+        description: Identifier of the review that counted (the latest one of the order).
+      - name: review_score
+        description: Review score (1 to 5) of the latest review of the order.
