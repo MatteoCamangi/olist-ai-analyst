@@ -31,6 +31,14 @@ models:
                 values: ['delivered', 'in_flight', 'canceled', 'unavailable']
       - name: is_delivered
         description: "{{ doc('is_delivered') }}"
+      - name: order_delivered_customer_date
+        description: Timestamp when the order was delivered to the customer.
+      - name: order_estimated_delivery_date
+        description: Estimated delivery date shown to the customer at purchase.
+      - name: delivery_days
+        description: Calendar days from purchase to delivery. Null unless the order is delivered and has a delivery date.
+      - name: is_late
+        description: True when delivery fell on a later calendar day than the estimate. Null when not eligible (not delivered, or no delivery date), so count(is_late) is the eligible denominator.
       - name: customer_state
         description: Brazilian state (27 values) of the order's customer record. Location always comes from the order, not from the person.
       - name: customer_city
@@ -48,3 +56,4 @@ models:
         description: Identifier of the review that counted (the latest one of the order).
       - name: review_score
         description: Review score (1 to 5) of the latest review of the order.
+        

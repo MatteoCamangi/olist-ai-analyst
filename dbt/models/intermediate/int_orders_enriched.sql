@@ -15,6 +15,16 @@ SELECT
         ELSE 'other'
     END AS order_status_group,
     o.order_status = 'delivered' AS is_delivered,
+    o.order_delivered_customer_date,
+    o.order_estimated_delivery_date,
+    CASE
+        WHEN o.order_status = 'delivered' AND o.order_delivered_customer_date IS NOT NULL
+            THEN DATE_DIFF('day', o.order_purchase_timestamp, o.order_delivered_customer_date)
+    END AS delivery_days,
+    CASE
+        WHEN o.order_status = 'delivered' AND o.order_delivered_customer_date IS NOT NULL
+            THEN CAST(o.order_delivered_customer_date AS DATE) > CAST(o.order_estimated_delivery_date AS DATE)
+    END AS is_late,
     c.customer_city,
     c.customer_state
 FROM {{ ref('stg_orders') }} o 
