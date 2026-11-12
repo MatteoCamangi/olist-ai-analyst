@@ -27,7 +27,7 @@ Build and evaluate AI analyst agents on the Olist e-commerce dataset (DuckDB + d
 - Test where the risk is introduced. Do not repeat tests already in an upstream layer. not_null only where a metric depends on the column.
 - Composite keys use dbt_utils.generate_surrogate_key, with not_null on the component columns.
 - Start from the grain table and left join. Reduce many-side tables (items, payments, reviews) to one row per order before joining. Never join two many-side tables.
-- Document marts fully. Staging gets a model description and inline text only where a column has a trap. A doc block is defined once, in the docs file of the first layer that documents the column. Block names are global, so later layers reference them with doc(). Names in SQL, YAML, doc() and ref() must match exactly.
+- Document marts fully. Staging gets a model description and inline text only where a column has a trap. Before describing a column, search dbt/models for the column name. If it already has a description in another model, reuse it with doc(), creating the block (in the docs file of the first layer that documents it) if it is still inline. Shared blocks stay generic: no grain-specific numbers, no reporting rules (those live in metrics.md). Names in SQL, YAML, doc() and ref() must match exactly.
 - One commit per unit of work, with its YAML, docs and tests. Merge commits, not squash.
 
 ## Decisions
@@ -38,6 +38,7 @@ Build and evaluate AI analyst agents on the Olist e-commerce dataset (DuckDB + d
 - dim_products holds the category rule: official translation, then a manual mapping for two names, then unknown.
 - dim_customers is one row per person, delivered orders only, with no location because 39 people appear in several states. Repeat flags: overall (a delivered order on a later calendar day) and 180-day cohort (null when the first order is after 2018-02-22).
 - Payments are out of scope for now. A future fct_order_payments is one row per payment.
+- int_orders_enriched also holds the delivery columns (order_delivered_customer_date, order_estimated_delivery_date, delivery_days, is_late). fct_orders takes item totals from int_order_sellers (one row per order and seller) re-aggregated by order; item price and freight are null and item and seller counts 0 for orders without items.
 
 ## Planned facts
 - fct_orders: one row per order (99,441). No seller and no payments. Columns: order_id, customer_id, customer_unique_id, order_purchase_timestamp/day/week/month, order_delivered_customer_date, order_estimated_delivery_date, order_status, order_status_group, is_delivered, delivery_days and is_late (null unless delivered with a delivery date), customer_city, customer_state, items_count, sellers_count, order_price, order_freight_value, review_id, review_score.
