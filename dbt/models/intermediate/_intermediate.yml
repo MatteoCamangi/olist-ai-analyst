@@ -13,13 +13,13 @@ models:
       - name: customer_unique_id
         description: "{{ doc('customer_unique_id') }}"
       - name: order_purchase_timestamp
-        description: Timestamp when the order was placed.
+        description: "{{ doc('order_purchase_timestamp') }}"
       - name: order_purchase_day
-        description: Calendar day of the purchase timestamp, as a date.
+        description: "{{ doc('order_purchase_day') }}"
       - name: order_purchase_week
-        description: Monday of the week of the purchase timestamp, as a date. Weeks run Monday to Sunday.
+        description: "{{ doc('order_purchase_week') }}"
       - name: order_purchase_month
-        description: First day of the month of the purchase timestamp, as a date.
+        description: "{{ doc('order_purchase_month') }}"
       - name: order_status
         description: "{{ doc('order_status') }}"
       - name: order_status_group
@@ -32,17 +32,17 @@ models:
       - name: is_delivered
         description: "{{ doc('is_delivered') }}"
       - name: order_delivered_customer_date
-        description: Timestamp when the order was delivered to the customer.
+        description: "{{ doc('order_delivered_customer_date') }}"
       - name: order_estimated_delivery_date
-        description: Estimated delivery date shown to the customer at purchase.
+        description: "{{ doc('order_estimated_delivery_date') }}"
       - name: delivery_days
-        description: Calendar days from purchase to delivery. Null unless the order is delivered and has a delivery date.
+        description: "{{ doc('delivery_days') }}"
       - name: is_late
-        description: True when delivery fell on a later calendar day than the estimate. Null when not eligible (not delivered, or no delivery date), so count(is_late) is the eligible denominator.
+        description: "{{ doc('is_late') }}"
       - name: customer_state
-        description: Brazilian state (27 values) of the order's customer record. Location always comes from the order, not from the person.
+        description: "{{ doc('customer_state') }}"
       - name: customer_city
-        description: City of the order's customer record, lowercase and without accents (for example `sao paulo`). The same city name exists in several states, so always use it together with `customer_state`.
+        description: "{{ doc('customer_city') }}"
 
 
   - name: int_orders_latest_reviews

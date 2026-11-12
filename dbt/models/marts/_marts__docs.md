@@ -21,3 +21,11 @@ Category name in Portuguese, exactly as in the source. `unknown` when the produc
 {% docs product_category_name_en %}
 English category name. Rule, in this order: the official translation; a manual English name for the two Portuguese categories missing from the translation table (`portateis_cozinha_e_preparadores_de_alimentos` becomes `portable_kitchen_and_food_preparers`, `pc_gamer` stays `pc_gamer`); otherwise `unknown`. Names keep the typos of the source (for example `home_confort`), so never fix or merge them.
 {% enddocs %}
+
+{% docs order_price %}
+Sum of item prices in the order, excluding freight. Revenue is sum(order_price) over delivered orders. Null when the order has no items. Gross amount: no refunds, costs or commission.
+{% enddocs %}
+
+{% docs order_review_score %}
+Score (1 to 5) of the order's latest review (by review_answer_timestamp, ties broken by review_id). Null when the order has no review, never 0. Filled for every status, so filter on is_delivered for the review metric.
+{% enddocs %}

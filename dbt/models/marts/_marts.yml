@@ -30,3 +30,62 @@ models:
         description: "{{ doc('product_category_name_pt') }}"
       - name: product_category_name_en
         description: "{{ doc('product_category_name_en') }}"
+
+  - name: fct_orders
+    description: >
+      One row per order, all statuses. Revenue, delivery and review metrics use delivered orders only (WHERE is_delivered).
+      Derived columns are null when an order is not eligible, so count(column) is the eligible denominator. Item prices
+      are null and item counts 0 for orders without items. No seller, product, category or payment columns (they would
+      break the grain) and no person-level behavior (see dim_customers).
+    columns:
+      - name: order_id
+        description: "{{ doc('order_id') }}"
+        data_tests:
+          - unique
+      - name: customer_id
+        description: "{{ doc('customer_id') }}"
+      - name: customer_unique_id
+        description: "{{ doc('customer_unique_id') }}"
+      - name: order_purchase_timestamp
+        description: "{{ doc('order_purchase_timestamp') }}"
+      - name: order_purchase_day
+        description: "{{ doc('order_purchase_day') }}"
+      - name: order_purchase_week
+        description: "{{ doc('order_purchase_week') }}"
+      - name: order_purchase_month
+        description: "{{ doc('order_purchase_month') }}"
+      - name: order_status
+        description: "{{ doc('order_status') }}"
+      - name: order_status_group
+        description: "{{ doc('order_status_group') }}"
+      - name: is_delivered
+        description: "{{ doc('is_delivered') }}"
+      - name: order_delivered_customer_date
+        description: "{{ doc('order_delivered_customer_date') }}"
+      - name: order_estimated_delivery_date
+        description: "{{ doc('order_estimated_delivery_date') }}"
+      - name: delivery_days
+        description: "{{ doc('delivery_days') }}"
+      - name: is_late
+        description: "{{ doc('is_late') }}"
+      - name: customer_city
+        description: "{{ doc('customer_city') }}"
+      - name: customer_state
+        description: "{{ doc('customer_state') }}"
+      - name: items_count
+        description: >
+          Number of item lines in the order (one row = one unit sold). 0, not null, for orders without items:
+          a count with nothing to count is a known zero, not missing data, so sum(items_count) gives the total items
+          and `items_count = 0` finds the orders without items.
+      - name: sellers_count
+        description: >
+          Number of distinct sellers in the order. 0, not null, for orders without items, for the same reason as
+          items_count. Never use it to count seller orders.
+      - name: order_price
+        description: "{{ doc('order_price') }}"
+      - name: order_freight_value
+        description: Sum of item freight values in the order. Not part of revenue. Null when the order has no items.
+      - name: review_id
+        description: Identifier of the review that counts for the order (its latest one). Null when the order has no review.
+      - name: review_score
+        description: "{{ doc('order_review_score') }}"
