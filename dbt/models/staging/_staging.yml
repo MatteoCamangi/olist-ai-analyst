@@ -98,7 +98,7 @@ models:
                 values: ['credit_card', 'boleto', 'voucher', 'debit_card', 'not_defined']
 
   - name: stg_order_reviews
-    description: One row per review. An order can have several reviews
+    description: One row per review and order (review_id + order_id is unique). The same review_id can appear on several orders, and an order can have several reviews.
     columns:
       - name: review_order_key
         data_tests:
