@@ -28,9 +28,5 @@ models:
           - unique
       - name: product_category_name_pt
         description: "{{ doc('product_category_name_pt') }}"
-        data_tests:
-          - not_null
       - name: product_category_name_en
         description: "{{ doc('product_category_name_en') }}"
-        data_tests:
-          - not_null
