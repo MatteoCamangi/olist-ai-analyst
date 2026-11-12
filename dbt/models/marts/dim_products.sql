@@ -1,6 +1,6 @@
 SELECT
     p.product_id,
-    COALESCE(pt.product_category_name, 'unknown') AS product_category_name_pt,
+    COALESCE(p.product_category_name, 'unknown') AS product_category_name_pt,
     COALESCE(
         pt.product_category_name_english,
         CASE p.product_category_name

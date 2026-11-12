@@ -17,7 +17,7 @@ models:
       - name: order_purchase_day
         description: Calendar day of the purchase timestamp, as a date.
       - name: order_purchase_week
-        description: Weeks run Monday to Sunday. Only complete weeks inside the analysis window are reported.
+        description: Monday of the week of the purchase timestamp, as a date. Weeks run Monday to Sunday.
       - name: order_purchase_month
         description: First day of the month of the purchase timestamp, as a date.
       - name: order_status
