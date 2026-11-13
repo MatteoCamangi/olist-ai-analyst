@@ -14,6 +14,10 @@ True when the customer has a delivered order on a later calendar day than their 
 True when the customer has a delivered order 1 to 180 calendar days after their first delivered order. Null when the first order is too recent to have had the full 180 days (after 2018-02-22, the as-of date minus 180 days), so `count(is_repeat_customer_180d)` is the eligible denominator. See metrics.md.
 {% enddocs %}
 
+{% docs product_id %}
+Identifier of the product (an anonymized hash). The data has no product names.
+{% enddocs %}
+
 {% docs product_category_name_pt %}
 Category name in Portuguese, exactly as in the source. `unknown` when the product has no category.
 {% enddocs %}

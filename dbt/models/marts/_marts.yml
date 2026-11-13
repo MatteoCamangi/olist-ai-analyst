@@ -23,7 +23,7 @@ models:
     description: One row per product (32,951) with its category. Holds the category rule, so no other model recomputes it. Weight and size are not included because no metric uses them.
     columns:
       - name: product_id
-        description: Identifier of the product (an anonymized hash). The data has no product names.
+        description: "{{ doc('product_id') }}"
         data_tests:
           - unique
       - name: product_category_name_pt
@@ -89,3 +89,54 @@ models:
         description: Identifier of the review that counts for the order (its latest one). Null when the order has no review.
       - name: review_score
         description: "{{ doc('order_review_score') }}"
+
+  - name: fct_order_items
+    description: >
+      One row per item line in an order (112,650), all statuses, key order_item_key. One item row is one unit sold, so
+      volume = count(*). Revenue = sum(item_price) WHERE is_delivered. Order-level columns (status, purchase dates,
+      customer) repeat on every item of an order, so count orders with count(distinct order_id) and people with
+      count(distinct customer_unique_id), never count(*). seller_state is the seller's state; customer_state is the
+      customer's. No review, delivery or payment columns, because they would count once per item (use fct_orders).
+    columns:
+      - name: order_item_key
+        description: Surrogate key of order_id and order_item_id. Unique per item line.
+        data_tests:
+          - unique
+      - name: order_id
+        description: "{{ doc('order_id') }}"
+      - name: order_item_id
+        description: Per-order counter of the item line (1, 2, ...). Unique only together with order_id, so never count its distinct values.
+      - name: product_id
+        description: "{{ doc('product_id') }}"
+      - name: seller_id
+        description: "{{ doc('seller_id') }}"
+      - name: customer_unique_id
+        description: "{{ doc('customer_unique_id') }}"
+      - name: order_purchase_day
+        description: "{{ doc('order_purchase_day') }}"
+      - name: order_purchase_week
+        description: "{{ doc('order_purchase_week') }}"
+      - name: order_purchase_month
+        description: "{{ doc('order_purchase_month') }}"
+      - name: order_status
+        description: "{{ doc('order_status') }}"
+      - name: order_status_group
+        description: "{{ doc('order_status_group') }}"
+      - name: is_delivered
+        description: "{{ doc('is_delivered') }}"
+      - name: customer_city
+        description: "{{ doc('customer_city') }}"
+      - name: customer_state
+        description: "{{ doc('customer_state') }}"
+      - name: product_category_name_en
+        description: "{{ doc('product_category_name_en') }}"
+      - name: seller_city
+        description: City of the seller, not of the customer. The same name exists in several states, so always use it together with seller_state. Use it only when the question is about seller location.
+      - name: seller_state
+        description: Brazilian state of the seller, not of the customer. Use it only when the question is about seller location.
+        data_tests:
+          - not_null
+      - name: item_price
+        description: Price of the item, excluding freight. Revenue is sum(item_price) over delivered items. Gross amount, with no refunds, costs or commission.
+      - name: item_freight_value
+        description: Freight charged for the item. Not part of revenue.

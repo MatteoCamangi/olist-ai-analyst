@@ -2,6 +2,10 @@
 Identifier of the order (an anonymized hash). It links orders to their items, payments and reviews.
 {% enddocs %}
 
+{% docs seller_id %}
+Identifier of the seller (an anonymized hash). The data has no seller names.
+{% enddocs %}
+
 {% docs customer_id %}
 Identifier of the customer record created for one order. It is unique per order, so it identifies an order's customer record, not a person. To count people, use `customer_unique_id`.
 {% enddocs %}
