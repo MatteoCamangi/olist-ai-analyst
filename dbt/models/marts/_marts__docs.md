@@ -30,6 +30,14 @@ English category name. Rule, in this order: the official translation; a manual E
 Sum of item prices in the order, excluding freight. Revenue is sum(order_price) over delivered orders. Null when the order has no items. Gross amount: no refunds, costs or commission.
 {% enddocs %}
 
+{% docs seller_city %}
+City of the seller, not of the customer. The same name exists in several states, so always use it together with seller_state. Use it only when the question is about seller location.
+{% enddocs %}
+
+{% docs seller_state %}
+Brazilian state of the seller, not of the customer. Use it only when the question is about seller location.
+{% enddocs %}
+
 {% docs order_review_score %}
 Score (1 to 5) of the order's latest review (by review_answer_timestamp, ties broken by review_id). Null when the order has no review, never 0. Filled for every status, so filter on is_delivered for the review metric.
 {% enddocs %}

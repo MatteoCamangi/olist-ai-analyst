@@ -131,12 +131,67 @@ models:
       - name: product_category_name_en
         description: "{{ doc('product_category_name_en') }}"
       - name: seller_city
-        description: City of the seller, not of the customer. The same name exists in several states, so always use it together with seller_state. Use it only when the question is about seller location.
+        description: "{{ doc('seller_city') }}"
       - name: seller_state
-        description: Brazilian state of the seller, not of the customer. Use it only when the question is about seller location.
+        description: "{{ doc('seller_state') }}"
         data_tests:
           - not_null
       - name: item_price
         description: Price of the item, excluding freight. Revenue is sum(item_price) over delivered items. Gross amount, with no refunds, costs or commission.
       - name: item_freight_value
         description: Freight charged for the item. Not part of revenue.
+
+  - name: fct_order_sellers
+    description: >
+      One row per order and seller (100,010 rows, 98,666 orders), all statuses. Orders without items are absent. An
+      order with items from several sellers (1,278 orders) has one row per seller. Revenue = sum(items_price) WHERE
+      is_delivered. Order-level columns (status, dates, delivery, review score, customer) repeat on every seller row of
+      an order: count orders with count(distinct order_id), and for order-level averages (delivery_days, is_late,
+      review_score) over all orders use fct_orders. Here a multi-seller order counts once per seller, which is the rule
+      for seller metrics (seller order counts are never added up). seller_state is the seller's state; customer_state
+      is the customer's.
+    columns:
+      - name: order_seller_key
+        description: Surrogate key of order_id and seller_id.
+        data_tests:
+          - unique
+      - name: order_id
+        description: "{{ doc('order_id') }}"
+      - name: seller_id
+        description: "{{ doc('seller_id') }}"
+      - name: order_purchase_timestamp
+        description: "{{ doc('order_purchase_timestamp') }}"
+      - name: order_purchase_day
+        description: "{{ doc('order_purchase_day') }}"
+      - name: order_purchase_week
+        description: "{{ doc('order_purchase_week') }}"
+      - name: order_purchase_month
+        description: "{{ doc('order_purchase_month') }}"
+      - name: order_status
+        description: "{{ doc('order_status') }}"
+      - name: order_status_group
+        description: "{{ doc('order_status_group') }}"
+      - name: is_delivered
+        description: "{{ doc('is_delivered') }}"
+      - name: delivery_days
+        description: "{{ doc('delivery_days') }}"
+      - name: is_late
+        description: "{{ doc('is_late') }}"
+      - name: review_score
+        description: "{{ doc('order_review_score') }}"
+      - name: customer_city
+        description: "{{ doc('customer_city') }}"
+      - name: customer_state
+        description: "{{ doc('customer_state') }}"
+      - name: seller_city
+        description: "{{ doc('seller_city') }}"
+      - name: seller_state
+        description: "{{ doc('seller_state') }}"
+        data_tests:
+          - not_null
+      - name: items_count
+        description: Number of item lines of the order sold by this seller (one row = one unit sold).
+      - name: items_price
+        description: Sum of item prices of the order sold by this seller, excluding freight. Seller revenue is sum(items_price) over delivered orders.
+      - name: items_freight_value
+        description: Sum of item freight values of the order sold by this seller. Not part of revenue.
