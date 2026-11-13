@@ -13,13 +13,13 @@ models:
       - name: customer_unique_id
         description: "{{ doc('customer_unique_id') }}"
       - name: order_purchase_timestamp
-        description: Timestamp when the order was placed.
+        description: "{{ doc('order_purchase_timestamp') }}"
       - name: order_purchase_day
-        description: Calendar day of the purchase timestamp, as a date.
+        description: "{{ doc('order_purchase_day') }}"
       - name: order_purchase_week
-        description: Monday of the week of the purchase timestamp, as a date. Weeks run Monday to Sunday.
+        description: "{{ doc('order_purchase_week') }}"
       - name: order_purchase_month
-        description: First day of the month of the purchase timestamp, as a date.
+        description: "{{ doc('order_purchase_month') }}"
       - name: order_status
         description: "{{ doc('order_status') }}"
       - name: order_status_group
@@ -31,10 +31,18 @@ models:
                 values: ['delivered', 'in_flight', 'canceled', 'unavailable']
       - name: is_delivered
         description: "{{ doc('is_delivered') }}"
+      - name: order_delivered_customer_date
+        description: "{{ doc('order_delivered_customer_date') }}"
+      - name: order_estimated_delivery_date
+        description: "{{ doc('order_estimated_delivery_date') }}"
+      - name: delivery_days
+        description: "{{ doc('delivery_days') }}"
+      - name: is_late
+        description: "{{ doc('is_late') }}"
       - name: customer_state
-        description: Brazilian state (27 values) of the order's customer record. Location always comes from the order, not from the person.
+        description: "{{ doc('customer_state') }}"
       - name: customer_city
-        description: City of the order's customer record, lowercase and without accents (for example `sao paulo`). The same city name exists in several states, so always use it together with `customer_state`.
+        description: "{{ doc('customer_city') }}"
 
 
   - name: int_orders_latest_reviews
@@ -48,3 +56,21 @@ models:
         description: Identifier of the review that counted (the latest one of the order).
       - name: review_score
         description: Review score (1 to 5) of the latest review of the order.
+        
+  - name: int_order_sellers
+    description: One row per order and seller. An order with items from several sellers has several rows. Orders without items are absent. Never add up rows to count orders. Not for direct querying.
+    columns:
+      - name: order_seller_key
+        description: Surrogate key of order_id and seller_id.
+        data_tests:
+          - unique
+      - name: order_id
+        description: "{{ doc('order_id') }}"
+      - name: seller_id
+        description: "{{ doc('seller_id') }}"
+      - name: items_count
+        description: Number of item lines of the order sold by this seller.
+      - name: items_price
+        description: Sum of item prices of the order sold by this seller.
+      - name: items_freight_value
+        description: Sum of item freight values of the order sold by this seller.

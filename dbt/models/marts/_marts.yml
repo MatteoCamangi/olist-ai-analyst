@@ -23,10 +23,175 @@ models:
     description: One row per product (32,951) with its category. Holds the category rule, so no other model recomputes it. Weight and size are not included because no metric uses them.
     columns:
       - name: product_id
-        description: Identifier of the product (an anonymized hash). The data has no product names.
+        description: "{{ doc('product_id') }}"
         data_tests:
           - unique
       - name: product_category_name_pt
         description: "{{ doc('product_category_name_pt') }}"
       - name: product_category_name_en
         description: "{{ doc('product_category_name_en') }}"
+
+  - name: fct_orders
+    description: >
+      One row per order, all statuses. Revenue, delivery and review metrics use delivered orders only (WHERE is_delivered).
+      Derived columns are null when an order is not eligible, so count(column) is the eligible denominator. Item prices
+      are null and item counts 0 for orders without items. No seller, product, category or payment columns (they would
+      break the grain) and no person-level behavior (see dim_customers).
+    columns:
+      - name: order_id
+        description: "{{ doc('order_id') }}"
+        data_tests:
+          - unique
+      - name: customer_id
+        description: "{{ doc('customer_id') }}"
+      - name: customer_unique_id
+        description: "{{ doc('customer_unique_id') }}"
+      - name: order_purchase_timestamp
+        description: "{{ doc('order_purchase_timestamp') }}"
+      - name: order_purchase_day
+        description: "{{ doc('order_purchase_day') }}"
+      - name: order_purchase_week
+        description: "{{ doc('order_purchase_week') }}"
+      - name: order_purchase_month
+        description: "{{ doc('order_purchase_month') }}"
+      - name: order_status
+        description: "{{ doc('order_status') }}"
+      - name: order_status_group
+        description: "{{ doc('order_status_group') }}"
+      - name: is_delivered
+        description: "{{ doc('is_delivered') }}"
+      - name: order_delivered_customer_date
+        description: "{{ doc('order_delivered_customer_date') }}"
+      - name: order_estimated_delivery_date
+        description: "{{ doc('order_estimated_delivery_date') }}"
+      - name: delivery_days
+        description: "{{ doc('delivery_days') }}"
+      - name: is_late
+        description: "{{ doc('is_late') }}"
+      - name: customer_city
+        description: "{{ doc('customer_city') }}"
+      - name: customer_state
+        description: "{{ doc('customer_state') }}"
+      - name: items_count
+        description: >
+          Number of item lines in the order (one row = one unit sold). 0, not null, for orders without items:
+          a count with nothing to count is a known zero, not missing data, so sum(items_count) gives the total items
+          and `items_count = 0` finds the orders without items.
+      - name: sellers_count
+        description: >
+          Number of distinct sellers in the order. 0, not null, for orders without items, for the same reason as
+          items_count. Never use it to count seller orders.
+      - name: order_price
+        description: "{{ doc('order_price') }}"
+      - name: order_freight_value
+        description: Sum of item freight values in the order. Not part of revenue. Null when the order has no items.
+      - name: review_id
+        description: Identifier of the review that counts for the order (its latest one). Null when the order has no review.
+      - name: review_score
+        description: "{{ doc('order_review_score') }}"
+
+  - name: fct_order_items
+    description: >
+      One row per item line in an order (112,650), all statuses, key order_item_key. One item row is one unit sold, so
+      volume = count(*). Revenue = sum(item_price) WHERE is_delivered. Order-level columns (status, purchase dates,
+      customer) repeat on every item of an order, so count orders with count(distinct order_id) and people with
+      count(distinct customer_unique_id), never count(*). seller_state is the seller's state; customer_state is the
+      customer's. No review, delivery or payment columns, because they would count once per item (use fct_orders).
+    columns:
+      - name: order_item_key
+        description: Surrogate key of order_id and order_item_id. Unique per item line.
+        data_tests:
+          - unique
+      - name: order_id
+        description: "{{ doc('order_id') }}"
+      - name: order_item_id
+        description: Per-order counter of the item line (1, 2, ...). Unique only together with order_id, so never count its distinct values.
+      - name: product_id
+        description: "{{ doc('product_id') }}"
+      - name: seller_id
+        description: "{{ doc('seller_id') }}"
+      - name: customer_unique_id
+        description: "{{ doc('customer_unique_id') }}"
+      - name: order_purchase_day
+        description: "{{ doc('order_purchase_day') }}"
+      - name: order_purchase_week
+        description: "{{ doc('order_purchase_week') }}"
+      - name: order_purchase_month
+        description: "{{ doc('order_purchase_month') }}"
+      - name: order_status
+        description: "{{ doc('order_status') }}"
+      - name: order_status_group
+        description: "{{ doc('order_status_group') }}"
+      - name: is_delivered
+        description: "{{ doc('is_delivered') }}"
+      - name: customer_city
+        description: "{{ doc('customer_city') }}"
+      - name: customer_state
+        description: "{{ doc('customer_state') }}"
+      - name: product_category_name_en
+        description: "{{ doc('product_category_name_en') }}"
+      - name: seller_city
+        description: "{{ doc('seller_city') }}"
+      - name: seller_state
+        description: "{{ doc('seller_state') }}"
+        data_tests:
+          - not_null
+      - name: item_price
+        description: Price of the item, excluding freight. Revenue is sum(item_price) over delivered items. Gross amount, with no refunds, costs or commission.
+      - name: item_freight_value
+        description: Freight charged for the item. Not part of revenue.
+
+  - name: fct_order_sellers
+    description: >
+      One row per order and seller (100,010 rows, 98,666 orders), all statuses. Orders without items are absent. An
+      order with items from several sellers (1,278 orders) has one row per seller. Revenue = sum(items_price) WHERE
+      is_delivered. Order-level columns (status, dates, delivery, review score, customer) repeat on every seller row of
+      an order: count orders with count(distinct order_id), and for order-level averages (delivery_days, is_late,
+      review_score) over all orders use fct_orders. Here a multi-seller order counts once per seller, which is the rule
+      for seller metrics (seller order counts are never added up). seller_state is the seller's state; customer_state
+      is the customer's.
+    columns:
+      - name: order_seller_key
+        description: Surrogate key of order_id and seller_id.
+        data_tests:
+          - unique
+      - name: order_id
+        description: "{{ doc('order_id') }}"
+      - name: seller_id
+        description: "{{ doc('seller_id') }}"
+      - name: order_purchase_timestamp
+        description: "{{ doc('order_purchase_timestamp') }}"
+      - name: order_purchase_day
+        description: "{{ doc('order_purchase_day') }}"
+      - name: order_purchase_week
+        description: "{{ doc('order_purchase_week') }}"
+      - name: order_purchase_month
+        description: "{{ doc('order_purchase_month') }}"
+      - name: order_status
+        description: "{{ doc('order_status') }}"
+      - name: order_status_group
+        description: "{{ doc('order_status_group') }}"
+      - name: is_delivered
+        description: "{{ doc('is_delivered') }}"
+      - name: delivery_days
+        description: "{{ doc('delivery_days') }}"
+      - name: is_late
+        description: "{{ doc('is_late') }}"
+      - name: review_score
+        description: "{{ doc('order_review_score') }}"
+      - name: customer_city
+        description: "{{ doc('customer_city') }}"
+      - name: customer_state
+        description: "{{ doc('customer_state') }}"
+      - name: seller_city
+        description: "{{ doc('seller_city') }}"
+      - name: seller_state
+        description: "{{ doc('seller_state') }}"
+        data_tests:
+          - not_null
+      - name: items_count
+        description: Number of item lines of the order sold by this seller (one row = one unit sold).
+      - name: items_price
+        description: Sum of item prices of the order sold by this seller, excluding freight. Seller revenue is sum(items_price) over delivered orders.
+      - name: items_freight_value
+        description: Sum of item freight values of the order sold by this seller. Not part of revenue.
