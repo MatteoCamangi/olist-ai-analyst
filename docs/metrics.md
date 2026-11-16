@@ -123,6 +123,8 @@ Evidence levels for validated values: "confirmed" means reproduced by the valida
 - Caveats: average only, no median computed
 - Validated value: 12.5 days (confirmed)
 
+Note on delivery metrics: for delivery time and late deliveries, "delivered" means order_status = 'delivered' AND a non-null order_delivered_customer_date (96,470 orders).
+
 ### Review score
 - Definition: score of the latest review of an order. The average is taken over reviewed orders
 - Population: delivered orders with a review (95,832)

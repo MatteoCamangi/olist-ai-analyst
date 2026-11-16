@@ -30,5 +30,5 @@ INNER JOIN late_deliveries_cte ld
     ON so.order_id = ld.order_id
 GROUP BY so.seller_id
 HAVING COUNT(*) >= 10
-ORDER BY late_rate_pct DESC 
+ORDER BY late_rate_pct DESC, delivered_orders DESC, seller_id
 LIMIT 1

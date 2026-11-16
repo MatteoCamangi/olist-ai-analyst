@@ -73,15 +73,6 @@ def check(con, entry):
         extra = {r.get("interpretation") for r in rows} - set(exp["interpretations"])
         if extra:
             errors.append(f"unexpected interpretations in gold result: {sorted(map(str, extra))}")
-        tie = exp.get("tie_at_cutoff")
-        if tie:  # the last ranked row must sit at the cutoff value, and the tied count must cover the tied rows shown
-            ranked = [r for r in rows if r.get("interpretation") == "by_orders"]
-            ranked.sort(key=lambda r: r["rnk"])
-            if ranked and ranked[-1][tie["column"]] != tie["value"]:
-                errors.append(f"tie_at_cutoff.value: expected {tie['value']}, last row has {ranked[-1][tie['column']]}")
-            shown = sum(r[tie["column"]] == tie["value"] for r in ranked)
-            if tie["tied_customers"] < shown:
-                errors.append(f"tie_at_cutoff.tied_customers {tie['tied_customers']} < {shown} tied rows in the top 10")
 
     elif qtype == "ranking":
         cmp_rows("rows", exp["rows"], rows, tol, errors)

@@ -18,8 +18,8 @@ Types:
 
 - `numeric`: named values from the single result row.
 - `ranking`: `key` (list of key columns) and ordered `rows`. Keys must match in order. Other columns are compared within tolerance.
-  q016 is ambiguous and stores two `interpretations` (`by_revenue`, `by_orders`), `tie_at_cutoff` for by_orders,
-  `min_overlap` (top-10 overlap needed to match an interpretation) and its behavior rules.
+  q016 is ambiguous and stores two `interpretations` (`by_revenue`, `by_orders`), `min_overlap`
+  (top-10 overlap needed to match an interpretation) and its behavior rules.
 - `set`: q004 stores the `p95` and `p25` seller_id sets and their counts.
 - `behavior`: q014 and q015 store the `facts` from the proof query and the `must`, `must_not` and `allowed` lists.
 

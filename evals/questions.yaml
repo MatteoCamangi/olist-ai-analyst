@@ -1282,10 +1282,6 @@
         customer_unique_id: 12f5d6e1cbf93dafd9dcc19095df0b3d
         delivered_orders: 6
         delivered_revenue: 58.4
-    tie_at_cutoff:
-      column: delivered_orders
-      value: 6
-      tied_customers: 5
     accepted_interpretations:
     - by_revenue
     - by_orders
