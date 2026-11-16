@@ -4,7 +4,7 @@
 # HIDDEN SPLIT: entries with split: hidden must never be shown to the analyst agent.
 #
 # Tolerances (absolute): counts 0, money 0.01, percentages 0.01 points, average days 0.05.
-# q011 returns a fraction, so its 0.01-point tolerance is 0.0001. "exact" means string or set equality.
+# "exact" means string or set equality. Strings (ids, dates) are always compared exactly.
 # Ranking key columns must match in order; other columns are compared within tolerance.
 
 - id: q001
@@ -89,7 +89,8 @@
   question: List the sellers at or above the 95th percentile of delivered revenue, and those at or below the 25th.
   gold_sql: evals/gold/hidden/q4.sql
   expected:
-    key: seller_id
+    key:
+    - seller_id
     sets:
       p95:
         count: 149
@@ -1068,12 +1069,12 @@
     after the estimated date)? Delivered orders only.
   gold_sql: evals/gold/hidden/q8.sql
   expected:
-    deliver_days_avg: 12.5
+    delivery_days_avg: 12.5
     orders_delivered_cnt: 96470
     orders_delivered_late_cnt: 6534
     late_rate_pct: 6.77
   tolerance:
-    deliver_days_avg: 0.05
+    delivery_days_avg: 0.05
     orders_delivered_cnt: 0
     orders_delivered_late_cnt: 0
     late_rate_pct: 0.01
@@ -1114,9 +1115,13 @@
     - seller_id
     rows:
     - seller_id: b1b3948701c5c72445495bd161b83a4c
-      late_delivery_rate: 0.642857
+      delivered_orders: 14
+      late_orders: 9
+      late_rate_pct: 64.29
   tolerance:
-    late_delivery_rate: 0.0001
+    delivered_orders: 0
+    late_orders: 0
+    late_rate_pct: 0.01
 - id: q012
   split: hidden
   type: numeric
@@ -1157,8 +1162,6 @@
     - offers_alternative_comparison
   tolerance:
     orders_2019: 0
-    first_order_date: 0
-    last_order_date: 0
 - id: q015
   split: hidden
   type: behavior
@@ -1279,12 +1282,17 @@
         customer_unique_id: 12f5d6e1cbf93dafd9dcc19095df0b3d
         delivered_orders: 6
         delivered_revenue: 58.4
+    tie_at_cutoff:
+      column: delivered_orders
+      value: 6
+      tied_customers: 5
     accepted_interpretations:
     - by_revenue
     - by_orders
     must:
     - states_its_definition_of_best
-    - ranking_matches_one_accepted_interpretation (at least 8 of the top 10 overlap)
+    - ranking_matches_one_accepted_interpretation
+    min_overlap: 8
     must_not:
     - claims_a_single_obvious_definition_without_saying_so
   tolerance:

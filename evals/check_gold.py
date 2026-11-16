@@ -14,9 +14,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 DB = ROOT / "warehouse.duckdb"
 QUESTIONS = ROOT / "evals" / "questions.yaml"
-
-# Gold columns whose name is replaced in the YAML.
-RENAME = {"q012": {"count_star()": "orders_last_90d"}}
+GOLD = ROOT / "evals" / "gold"
 
 
 def norm(v):
@@ -27,8 +25,7 @@ def norm(v):
 
 def run(con, entry):
     cur = con.execute((ROOT / entry["gold_sql"]).read_text())
-    ren = RENAME.get(entry["id"], {})
-    cols = [ren.get(d[0], d[0]) for d in cur.description]
+    cols = [d[0] for d in cur.description]
     return [dict(zip(cols, map(norm, r))) for r in cur.fetchall()]
 
 
@@ -76,12 +73,21 @@ def check(con, entry):
         extra = {r.get("interpretation") for r in rows} - set(exp["interpretations"])
         if extra:
             errors.append(f"unexpected interpretations in gold result: {sorted(map(str, extra))}")
+        tie = exp.get("tie_at_cutoff")
+        if tie:  # the last ranked row must sit at the cutoff value, and the tied count must cover the tied rows shown
+            ranked = [r for r in rows if r.get("interpretation") == "by_orders"]
+            ranked.sort(key=lambda r: r["rnk"])
+            if ranked and ranked[-1][tie["column"]] != tie["value"]:
+                errors.append(f"tie_at_cutoff.value: expected {tie['value']}, last row has {ranked[-1][tie['column']]}")
+            shown = sum(r[tie["column"]] == tie["value"] for r in ranked)
+            if tie["tied_customers"] < shown:
+                errors.append(f"tie_at_cutoff.tied_customers {tie['tied_customers']} < {shown} tied rows in the top 10")
 
     elif qtype == "ranking":
         cmp_rows("rows", exp["rows"], rows, tol, errors)
 
     elif qtype == "set":
-        key = exp["key"]
+        (key,) = exp["key"]
         for bucket, spec in exp["sets"].items():
             act = {r[key] for r in rows if r["percentile_bucket"] == bucket}
             if len(act) != spec["count"]:
@@ -117,6 +123,15 @@ def main(argv):
         entries = [e for e in entries if e["id"] in argv]
     con = duckdb.connect(str(DB), read_only=True)
     failed = 0
+
+    referenced = {e["gold_sql"] for e in yaml.safe_load(QUESTIONS.read_text())}
+    on_disk = {p.relative_to(ROOT).as_posix() for p in GOLD.glob("*/*.sql")}
+    for path in sorted(on_disk - referenced):
+        print(f"FAIL {path} is not referenced by questions.yaml")
+        failed += 1
+    for path in sorted(referenced - on_disk):
+        print(f"FAIL {path} is referenced by questions.yaml but missing")
+        failed += 1
     for entry in entries:
         try:
             errors = check(con, entry)
@@ -127,7 +142,7 @@ def main(argv):
         for err in errors:
             print(f"       {err}")
         failed += bool(errors)
-    print(f"\n{len(entries) - failed}/{len(entries)} gold results match questions.yaml")
+    print(f"\n{failed} failure(s) across {len(entries)} questions and the gold file check")
     return 1 if failed else 0
 
 
