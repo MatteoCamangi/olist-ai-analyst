@@ -1,0 +1,1293 @@
+# Expected answers for the analyst-agent evals.
+# Generated from the live results of the gold queries in evals/gold/ (warehouse.duckdb, read-only).
+# Verify with: python evals/check_gold.py
+# HIDDEN SPLIT: entries with split: hidden must never be shown to the analyst agent.
+#
+# Tolerances (absolute): counts 0, money 0.01, percentages 0.01 points, average days 0.05.
+# q011 returns a fraction, so its 0.01-point tolerance is 0.0001. "exact" means string or set equality.
+# Ranking key columns must match in order; other columns are compared within tolerance.
+
+- id: q001
+  split: dev
+  type: numeric
+  question: How many orders did Olist receive in 2017 (by purchase date)? How many of them were delivered? What was the total
+    revenue of the delivered ones?
+  gold_sql: evals/gold/dev/q1.sql
+  expected:
+    orders_cnt: 45101
+    delivered_orders_cnt: 43428
+    total_revenue: 5962902.01
+  tolerance:
+    orders_cnt: 0
+    delivered_orders_cnt: 0
+    total_revenue: 0.01
+- id: q002
+  split: dev
+  type: ranking
+  question: Who are the top 10 customers by delivered revenue? (customer_unique_id)
+  gold_sql: evals/gold/dev/q2.sql
+  expected:
+    key:
+    - customer_unique_id
+    rows:
+    - customer_unique_id: 0a0a92112bd4c708ca5fde585afaa872
+      customer_revenue: 13440.0
+    - customer_unique_id: da122df9eeddfedc1dc1f5349a1a690c
+      customer_revenue: 7388.0
+    - customer_unique_id: 763c8b1c9c68a0229c42c9fc6f662b93
+      customer_revenue: 7160.0
+    - customer_unique_id: dc4802a71eae9be1dd28f5d788ceb526
+      customer_revenue: 6735.0
+    - customer_unique_id: 459bef486812aa25204be022145caa62
+      customer_revenue: 6729.0
+    - customer_unique_id: ff4159b92c40ebe40454e3e6a7c35ed6
+      customer_revenue: 6499.0
+    - customer_unique_id: 4007669dec559734d6f53e029e360987
+      customer_revenue: 5934.6
+    - customer_unique_id: eebb5dda148d3893cdaf5b5ca3040ccb
+      customer_revenue: 4690.0
+    - customer_unique_id: 48e1ac109decbb87765a3eade6854098
+      customer_revenue: 4590.0
+    - customer_unique_id: a229eba70ec1c2abef51f04987deb7a5
+      customer_revenue: 4400.0
+  tolerance:
+    customer_revenue: 0.01
+- id: q003
+  split: hidden
+  type: ranking
+  question: Who are the top 10 sellers by delivered revenue?
+  gold_sql: evals/gold/hidden/q3.sql
+  expected:
+    key:
+    - seller_id
+    rows:
+    - seller_id: 4869f7a5dfa277a7dca6462dcf3b52b2
+      seller_revenue: 226987.93
+    - seller_id: 53243585a1d6dc2643021fd1853d8905
+      seller_revenue: 217940.44
+    - seller_id: 4a3ca9315b744ce9f8e9374361493884
+      seller_revenue: 196882.12
+    - seller_id: fa1c13f2614d7b5c4749cbc52fecda94
+      seller_revenue: 190917.14
+    - seller_id: 7c67e1448b00f6e969d365cea6b010ab
+      seller_revenue: 186570.05
+    - seller_id: 7e93a43ef30c4f03f38b393420bc753a
+      seller_revenue: 165981.49
+    - seller_id: da8622b14eb17ae2831f4ac5b9dab84a
+      seller_revenue: 159816.87
+    - seller_id: 7a67c85e85bb2ce8582c35f2203ad736
+      seller_revenue: 139658.69
+    - seller_id: 1025f0e2d44d7041d6cf58b6550e0bfa
+      seller_revenue: 138208.56
+    - seller_id: 955fee9216a65b617aa5c0531780ce60
+      seller_revenue: 131836.71
+  tolerance:
+    seller_revenue: 0.01
+- id: q004
+  split: hidden
+  type: set
+  question: List the sellers at or above the 95th percentile of delivered revenue, and those at or below the 25th.
+  gold_sql: evals/gold/hidden/q4.sql
+  expected:
+    key: seller_id
+    sets:
+      p95:
+        count: 149
+        seller_ids:
+        - 001cca7ae9ae17fb1caed9dfb1094831
+        - 004c9cd9d87a3c30c522c48c4fc07416
+        - 00ee68308b45bc5e2660cd833c3f81cc
+        - 0241d4d5d36f10f80c644447315af0bd
+        - 04308b1ee57b6625f47df1d56f00eedf
+        - 05ff92fedb5be47920fea08e501238b9
+        - 06a2c3af7b3aee5d69171b0e14f0ee87
+        - 06e5eefc71ec47ae763c5c6f8db7064f
+        - 0b90b6df587eb83608a64ea8b390cf07
+        - 0c8380b62e38e8a1e6adbeba7eb9688c
+        - 0dd184061fb0eaa7ca37932c68ab91c5
+        - 1025f0e2d44d7041d6cf58b6550e0bfa
+        - 12b9676b00f60f3b700e83af21824c0e
+        - 1554a68530182680ad5c8b042c3ab563
+        - 16090f2ca825584b5a147ab24aa30c86
+        - 165fc07beebdcb6190fba8a06db2a449
+        - 17a053fcb14bd219540cbde0df490be0
+        - 17e34d8224d27a541263c4c64b11a56b
+        - 17f51e7198701186712e53a39c564617
+        - 1835b56ce799e6a4dc4eddc053f04066
+        - 1900267e848ceeba8fa32d80c1a5f5a8
+        - 1a3df491d1c4f1589fc2b934ada68bf2
+        - 1c68394e931a64f90ea236c5ea590300
+        - 1e8b33f18b4f7598d87f5cbee2282cc2
+        - 1f50f920176fa81dab994f9023523100
+        - 218d46b86c1881d022bce9c68a7d4b15
+        - 2528513dd95219a6013d4d05176e391a
+        - 25c5c91f63607446a97b143d2d535d31
+        - 2b3e4a2a3ea8e01938cabda2a3e5cc79
+        - 2bf6a2c1e71bbd29a4ad64e6d3c3629f
+        - 2eb70248d66e0e3ef83659f71b244378
+        - 37be5a7c751166fbc5f8ccba4119e043
+        - 391fc6631aebcf3004804e51b40bcf1e
+        - 3d871de0142ce09b7081e2b9d1733cb1
+        - 40db9e9aa57f7bb151bcda6b0f9bdbb7
+        - 44073f8b7e41514de3b7815dd0237f4f
+        - 46dc3b2cc0980fb8ec44634e21d2718e
+        - 48162d548f5b1b11b9d29d1e01f75a61
+        - 4869f7a5dfa277a7dca6462dcf3b52b2
+        - 4a3ca9315b744ce9f8e9374361493884
+        - 4d6d651bd7684af3fffabd5f08d12e5a
+        - 4e922959ae960d389249c378d1c939f5
+        - 522620dcb18a6b31cd7bdf73665113a9
+        - 527801b552d0077ffd170872eb49683b
+        - 53243585a1d6dc2643021fd1853d8905
+        - 53e4c6e0f4312d4d2107a8c9cddf45cd
+        - 54a1852d1b8f10312c55e906355666ee
+        - 59417c56835dd8e2e72f91f809cd4092
+        - 59b22a78efb79a4797979612b885db36
+        - 59fb871bf6f4522a87ba567b42dafecf
+        - 5c243662ce92d84573bfaff24c3e3700
+        - 5dceca129747e92ff8ef7a997dc4f8ca
+        - 612170e34b97004b3ba37eae81836b4c
+        - 620c87c171fb2a6dd6e8bb4dec959fc6
+        - 634964b17796e64304cadf1ad3050fb7
+        - 6560211a19b47992c3666cc44a7e94c0
+        - 70a12e78e608ac31179aea7f8422044b
+        - 70eea00b476a314817cefde4aad4f89a
+        - 710e3548e02bc1d2831dfc4f1b5b14d4
+        - 712e6ed8aa4aa1fa65dab41fed5737e4
+        - 7142540dd4c91e2237acb7e911c4eba2
+        - 7178f9f4dd81dcef02f62acdf8151e01
+        - 7299e27ed73d2ad986de7f7c77d919fa
+        - 729f06993dac8e860d4f02d7088ca48a
+        - 744dac408745240a2c2528fb1b6028f3
+        - 7681ef142fd2c19048da7430856b5588
+        - 76d5af76d0271110f9af36c92573f765
+        - 76d64c4aca3a7baf218bf93ef7fa768d
+        - 77530e9772f57a62c906e1c21538ab82
+        - 7a67c85e85bb2ce8582c35f2203ad736
+        - 7ad32824caee82087b3e2e5f33b1bf32
+        - 7b0df942f46435babab05d49b744b2c4
+        - 7c67e1448b00f6e969d365cea6b010ab
+        - 7d13fca15225358621be4086e1eb0964
+        - 7ddcbb64b5bc1ef36ca8c151f6ec77df
+        - 7e1fb0a3ebfb01ffb3a7dae98bf3238d
+        - 7e93a43ef30c4f03f38b393420bc753a
+        - 8160255418d5aaa7dbdc9f4c64ebda44
+        - 821fb029fc6e495ca4f08a35d51e53a5
+        - 834f3294fba9f932f56edc879193f925
+        - 8444e55c1f13cd5c179851e5ca5ebd00
+        - 850f4f8af5ea87287ac68de36e29107f
+        - 855668e0971d4dfd7bef1b6a4133b41b
+        - 8581055ce74af1daba164fdbd55a40de
+        - 87142160b41353c4e5fca2360caf6f92
+        - 88460e8ebdecbfecb5f9601833981930
+        - 897060da8b9a21f655304d50fd935913
+        - 8b321bb669392f5163d04c59e235e066
+        - 8f2ce03f928b567e3d56181ae20ae952
+        - 900ba814c251a692506d7834c1218441
+        - 94144541854e298c2d976cb893b81343
+        - 955fee9216a65b617aa5c0531780ce60
+        - 96493fab2fbb13a14d0c0e8772eef5c3
+        - 966cb4760537b1404caedd472cc610a5
+        - 9c0e69c7bf2619675bbadf47b43f655a
+        - 9de4643a8dbde634fe55621059d92273
+        - 9f505651f4a6abe901a56cdc21508025
+        - a1043bafd471dff536d0c462352beb48
+        - a3a38f4affed601eb87a97788c949667
+        - a416b6a846a11724393025641d4edd5e
+        - a888faf2d1baececa6baf9c3d603ee1f
+        - abe42c5d03695b4257b5c6cbf4e6784e
+        - b1b3948701c5c72445495bd161b83a4c
+        - b2ba3715d723d245138f291a6fe42594
+        - b32be1695eb7ec5f10f72d9610a12527
+        - b33e7c55446eabf8fe1a42d037ac7d6d
+        - b37c4c02bda3161a7546a4e6d222d5b2
+        - b839e41795b7f3ad94cc2014a52f6796
+        - b94cc9f10ddc85e4ba73a6f7974e7101
+        - ba90964cff9b9e0e6f32b23b82465f7b
+        - bfd27a966d91cfaafdb25d076585f0da
+        - c003204e1ab016dfa150abc119207b24
+        - c3867b4666c7d76867627c2f7fb22e21
+        - c3cfdc648177fdbbbb35635a37472c53
+        - c70c1b0d8ca86052f45a432a38b73958
+        - c72de06d72748d1a0dfb2125be43ba63
+        - c826c40d7b19f62a09e2d7c5e7295ee2
+        - cc419e0650a3c5ba77189a1882b7556a
+        - cca3071e3e9bb7d12640c9fbe2301306
+        - ccc4bbb5f32a6ab2b7066a4130f114e3
+        - cd68562d3f44870c08922d380acae552
+        - ceaec5548eefc6e23e6607c5435102e7
+        - d1c281d3ae149232351cd8c8cc885f0d
+        - d23019c84ffae2d5ef2270367b8605fc
+        - d2374cbcbb3ca4ab1086534108cc3ab7
+        - d650b663c3b5f6fb392b6326366efa9a
+        - d91fb3b7d041e83b64a00a3edfb37e4f
+        - da8622b14eb17ae2831f4ac5b9dab84a
+        - dbc22125167c298ef99da25668e1011f
+        - dc317f341ab0e22f39acbd9dbf9b4a1f
+        - dc4a0fc896dc34b0d5bfec8438291c80
+        - de23c3b98a88888289c6f5cc1209054a
+        - de722cd6dad950a92b7d4f82673f8833
+        - e59aa562b9f8076dd550fcddf0e73491
+        - e882b2a25a10b9c057cc49695f222c19
+        - e9779976487b77c6d4ac45f75ec7afe9
+        - e9bc59e7b60fc3063eb2290deda4cced
+        - ea8482cd71df3c1969d7b9473ff13abc
+        - edb1ef5e36e0c8cd84eb3c9b003e486d
+        - eeb6de78f79159600292e314a77cbd18
+        - f45122a9ab94eb4f3f8953578bc0c560
+        - f457c46070d02cadd8a68551231220dd
+        - f5a590cf36251cf1162ea35bef76fe84
+        - f62d7bb4a613ec758a03342d46b580b2
+        - f7ba60f8c3f99e7ee4042fdef03b70c4
+        - f8db351d8c4c4c22c6835c19a46f01b0
+        - fa1c13f2614d7b5c4749cbc52fecda94
+        - fe2032dab1a61af8794248c8196565c9
+        - ff69aa92bb6b1bf9b8b7a51c2ed9cf8b
+      p25:
+        count: 744
+        seller_ids:
+        - 003554e2dce176b5555353e4f3555ac8
+        - 00ab3eff1b5192e5f1a63bcecfee11c8
+        - 00d8b143d12632bad99c0ad66ad52825
+        - 011b0eaba87386a2ae96a7d32bb531d1
+        - 01266d4c46afa519678d16a8b683d325
+        - 028872bfa080090a9d0abd4f1af168f8
+        - 0336182e1b3e92f029d5354832045fdf
+        - 034b9387752bfa309f350a70cd45ffa3
+        - 039b29ff3b3473435d0cd59040575de9
+        - 044668ccd5316b12a7cf0d54a156e3e9
+        - 05a48cc8859962767935ab9087417fbb
+        - 05aebce0b5c8f0d41b29b686f2d05fd3
+        - 05ca864204d09595ae591b93ea9cf93d
+        - 05e107217c7266362fd44b75b2cd4cc4
+        - 062c325cd6a2b87845fab56b4ec2eeae
+        - 0692610d8abe24f287e9fae90ea0bbee
+        - 077c5fae4bea9500e3737b16f71b9d3a
+        - 07a9bc7f61396b658ddf3ac534efe44c
+        - 07e8e8fc5222bb358e6f259da3197074
+        - 08061dc0fc165ed41288cc7acde738ee
+        - 0936e1837d0c79253456bbb2ffaaef10
+        - 0a198e95d32b1be2da9424c962a6ebfa
+        - 0ade5cc4a305ed7093a23f68ca47519c
+        - 0af2ab31141893d26aca5a404a537dab
+        - 0b09101900100c0e9d312861fad5a1b9
+        - 0b1ca3ef18a63d7eb0c8897fa0849c08
+        - 0b3f27369a4d8df98f7eb91077e438ac
+        - 0b46f784306be7200ca1700aa55d819f
+        - 0b64bcdb0784abc139af04077d49a20e
+        - 0bb27263628258b8111a0262769fa9db
+        - 0daf5180aa44356f60f8effa533b55a2
+        - 0dfbed20065e425d2eaefb101f9816c0
+        - 0e72c1a751b496722a6cb1f10653b62a
+        - 0ee4fb99ac55ffbbc98795aa01b7f8fa
+        - 0f519b0d2e5eb2227c93dd25038bfc01
+        - 0f7eea709efdf942b5f95c7516dbacd7
+        - 0f80a40c312b2472dca482cf50f5186f
+        - 0f94588695d71662beec8d883ffacf09
+        - 10cdd491d1dbea8fb4ead97b19c334ce
+        - 119c7f1a00ef43fad0e57604e76a747c
+        - 11d4c477d09821164bca4f70a2eae031
+        - 1352e06ae67b410cdae0b2a22361167b
+        - 139157dd4daa45c25b0807ffff348363
+        - 13dd308f81fea30cc670c656b2b46cc3
+        - 13e85aac53340018b40c2af68001b7e0
+        - 154bdf805377afea75a3bd158e9eab10
+        - 15b3b1b81484422eb41df68ac87f1f50
+        - 160851d3ece7aa1a510f8d1a4bb8a8af
+        - 164a5a8794e6d42e14f55e447b12a3bc
+        - 166e8f1381e09651983c38b1f6f91c11
+        - 16bdc8cefd0e32a6f0824d296c5ad14a
+        - 17998cf586426bf0f2c3726cb0a4b211
+        - 1927cdb9fa74f5270097f6250e8e8f34
+        - 19484c79cef6c062cb177aa4ef2fcc3c
+        - 19d62d484cba71963c93f0f00ab42013
+        - 19e0f40a907ec568c34bfac15de4f4a1
+        - 1a8e2d9c38b84a9702ac7922924b0573
+        - 1b0b0f4f95e962d6f32fe90c759d0479
+        - 1b61fb1f0f2185d89e9a126c498e9cc7
+        - 1c56ffe0e9dea2657fc6e95b53f40b13
+        - 1c742ac33582852aaf3bcfbf5893abcf
+        - 1c83418358f249c9d6affa52d579db0e
+        - 1cbcd2ee0afb3fc09963b87eb65e7e4f
+        - 1cbdc7cf130a41fd13a3c2a7d2fcfda7
+        - 1d0646a72178a6fb37ee8082140e06ec
+        - 1d139e3a3b14025640d8df1b230aace0
+        - 1d1bbb8ac1581824986f582583fff01d
+        - 1d953075c2f0dd990bacf27b83b330f1
+        - 1de62b6f2fd96227629786db492433db
+        - 1e47d8b6546eb3a77b1acddcc9406242
+        - 1e483cc5c76fef08d3ca05f9a8af7d01
+        - 1f2eebc0e970fd3c463e4f5d9652687a
+        - 1f7dfad2cb384ea4d2d7e1ffbd78c407
+        - 1fa2d3def6adfa70e58c276bb64fe5bb
+        - 1fbe10c70e30765ed1de86d9f7e98409
+        - 2039c5e51785b5dde7cf93ccb3b7be2c
+        - 204b4e07bddef3c9b317f70189135b22
+        - 20611af7866c6068fd5ae1f9dbe15c92
+        - 2075d8cd4dd63ff12df0749a5866bb06
+        - 20d53aad4fe5ee93a64f8839609d3586
+        - 20f0aeea30bc3b8c4420be8ced4226c0
+        - 213fafb0ca06fb3d5886579c2565791b
+        - 217f005bb37ff3aeef5b2ae1788e75ba
+        - 2235cf78d3e2073a88146a9cb60f0dd0
+        - 22a23e5ac7061fc538cc2a019afaaf16
+        - 22c32ec35d0116ef02c281798a25bf8b
+        - 23ca5f678e0b3ea6c630b30fa8bf51ea
+        - 23ff42c4bf1f8f16cddb19d8b972974a
+        - 247587846358bb1d2e4c6522020b36fe
+        - 24a6daf925d9d591870a66660416de31
+        - 253c025bab43881055aeecde5e2d8b77
+        - 258447aad3f7b01e2643c89f64dc5647
+        - 26562f211dd1364af2a8596dc945e8ae
+        - 269c5fc9fcadee614364c3620c30a1f9
+        - 26e13b6ff5b641b329e5524241ee2c93
+        - 26e2e5033827d2ba53929f43e03d8ffe
+        - 26f6b7ab07be3e9e69ce82a6552efc19
+        - 270572bb714b00531be85e16e1550f26
+        - 271b8923c6a549e02d3c9fd1f8c0422b
+        - 28405831a29823802aa22c084cfd0649
+        - 28a26ebce31d5918b181ede016fd693b
+        - 28c7d8743fbc8679f484868cc0fcaefb
+        - 28d162ab86bb49d719c32f0ee6186eaa
+        - 296729ffb9b684050dd24836dac4494a
+        - 299c89a525fee36c567f4fe72f038100
+        - 29c322e3f09f886f8bacbe91dfbd979e
+        - 2a50b7ee5aebecc6fd0ff9784a4747d6
+        - 2a7c6c0b0d5efde2bf75ec1e1cec2d41
+        - 2aafae69bf4c41fbd94053d9413e87ee
+        - 2b5ed0c9139dae8883a200dfcb272ece
+        - 2bdb95a56a36ebbc6640337ac5eac174
+        - 2c00c85d30361cd2ced2969cffbbffa3
+        - 2c2c9832d1bb38c5b0034a3b47d313ee
+        - 2c54051840f19eca309a5423cf22df36
+        - 2c9005d8043aff18b8557ffb7b13cda4
+        - 2cb4700db635baa1c0d4f90ed27b6669
+        - 2cb98e27ce1c18abdb42209b34c382a7
+        - 2d20f1cd18725c91147da0791d498022
+        - 2d2322d842118867781fc737e96d59a1
+        - 2d34636518ba88f5349b732fcf8ba2e4
+        - 2d8cfba3fcd3170555941605edaa196a
+        - 2e2f44824ab87a0cb961f68bf4073e7f
+        - 2ea0861cc19e94cad86438c984c52da4
+        - 2ec6e37d992a95eaddb3369dcbcc76d9
+        - 2eeb6531ee027a48d401e72bebdd87d3
+        - 2ef086a599b597572aca4433b7ed6b3d
+        - 2f1e7b90e01d9f086cbcb301c0c3d406
+        - 2f3d8b4c9e2ee165075331fea3f3095a
+        - 2f9b7ce230a057a98a9f5df5893ee36c
+        - 2fa13c8bd5705d279f7ed5cc9ec61c68
+        - 31e60bf8d103ce47932a85f5562deb16
+        - 324583d68897f5ddbaf38f6248322176
+        - 3289d8c3eef4873f91ce0b1343c0dd58
+        - 32f83ffe11cd40f7adcf4eef171f52d9
+        - 33ab10be054370c254ddfcf0a6253422
+        - 33d677f27a69b84051204ee4ae76eaca
+        - 33fd411ed63a7c2f9005e3f065d9f85d
+        - 3442033154be05bac582e173ef54fd12
+        - 344223b2a90784f64136a8a5da012e7f
+        - 3442f8959a84dea7ee197c632cb2df15
+        - 34675b28b826facfde119785bf287dc1
+        - 35281d148dcf7134bae913c57db4e6da
+        - 353e21e8bf8de2722b4fae1636664b76
+        - 3606774ec64634822d78dc2db6d37045
+        - 36f98ad67cc981f50ce8aed093d5783c
+        - 37303482a42fb700d8d127e70a9cd6c8
+        - 376d67b61dce0c990155286e7ae486a4
+        - 377bc18334c78dd2f1535ef22a3ad225
+        - 389e45560e33d2d0747f949dcddbc08e
+        - 38f276ca6e7cc95a6d1bb55ac9e5550f
+        - 3903c788ded8dc03b5ebab37a2f3e9a1
+        - 391bbd13b6452244774beff1824006ed
+        - 392f7f2c797e4dc077e4311bde2ab8ce
+        - 3986c0b54f6b748b75e7bd4e092aa3e5
+        - 398cb257329ef7af7f1943a8974a3cbc
+        - 3a3c180dd702a725bd0ba4117689239e
+        - 3a52d63a8f9daf5a28f3626d7eb9bd28
+        - 3a79f35a2344ede41af21267f61d5ec6
+        - 3aa3c89ae3cd482385568be76120f63c
+        - 3ac588cd562971392504a9e17130c40b
+        - 3bb32fedaa74e4ad20f4ce067733bd31
+        - 3c88ed2e76a2247933a15daa7161eb1c
+        - 3d2400ac620cffa23ac81bd192f7f555
+        - 3d290fe363c60a77498c1126fd3fb8d3
+        - 3d49bfdd1b43a7fe169b3740067acc61
+        - 3d62f86afa7c73be2628a3be1423f5a0
+        - 3d700782d7818f2c1e0d7a9e9d75fc00
+        - 3da38366e7bd9baf6369071f782ecdf0
+        - 3dc69bf2c42f0568a5c4791ec3fd3745
+        - 3ded4e2d5f135cb103e5949d7263d2dd
+        - 3dfd3dc96f7f8598eca74e9ac8a2fa31
+        - 3e35a8bb43569389d3cebef0ce820f69
+        - 3e46a38ee171c503c3b4a3f23fe3bf0c
+        - 3e51f9cbe317bc3a88f2c76583811ee4
+        - 3ea08c48e851106d2f584349daba335f
+        - 3f84fefc07dc159b268d4a77d3e8c425
+        - 3fadb4cba4c35bce6a7eaf9872d5623a
+        - 3fe7120d6257285ac6a3ce7cb071ccec
+        - 3fefda3299e6dfaea3466ef346a3571a
+        - 4003520d80d0bad1d5623f7aa3c63cda
+        - 40ec8ab6cdafbcc4f544da38c67da39a
+        - 4125d9385a25e82d2f72d3a0fd55bc3f
+        - 417a1e6c7321084d2a0ae0d023cfad93
+        - 41958cbd3335433c8740300e8cd600d5
+        - 42d4b7e70819438f5ada61c965e92d7e
+        - 42fb44130ac3134cde8e35cf8ec7df25
+        - 436bf27f2f18474fc6047702e9f8a866
+        - 43753b27d77860f1654aa72e251a7878
+        - 43a1d4bab73b816e44ef4e4facd9f9b5
+        - 43a5d4a57af536fddc96d08be3afdfcb
+        - 43b2c864251aa0ce4030c746984e088a
+        - 443d880f15cbd3572885e1d44bf2c478
+        - 4450bd8327d471c4a11a83d1445b1b62
+        - 44717f64ec2a457979cf83c429077666
+        - 447d377bdb757058acb569025ee18a93
+        - 44ed138eca6214d572ce1d813fb0049b
+        - 455befea1bb853c75ccbca94cff26e5c
+        - 455f46ef09a9e45667e2981df84b5cc2
+        - 45c20d94d9171b0bcfab3c955e47d67b
+        - 461ff5303b6c9c1a4a07f40c5aece516
+        - 466222e777149751370e7e98fb623b0c
+        - 478bfe564db21eeb44386606aa30b650
+        - 47f55702f598c7c6cc8458b0fbc1c49a
+        - 485452467ff670447e84a8370c3fc898
+        - 4867209cb29b56b92893d7bde3ce8012
+        - 48e5ee06fb2dc74df1c711a9b6dfac2a
+        - 4965a7002cca77301c82d3f91b82e1a9
+        - 497709c2976a8fa308730a2dec5b0726
+        - 499185655c29ecfdbfe776ef7cf875b5
+        - 49f8d2ea7b718d0ce587d34207caf2b4
+        - 4a5b36211b1f51bf7eaa5c10a57fa483
+        - 4a82c4af97ffc0fb2dc26bfdc03b1842
+        - 4aba6a02a788d3ec81c03137144d9a80
+        - 4bcec44888b30ba9001234c534716d3f
+        - 4bde6149c15cf7e177b36fa060dd6de8
+        - 4be9ae93c4fc0f41713d71a4194ee1b3
+        - 4c1c7281388a33dd06daac44f9fadbd1
+        - 4c4d546adf3c3868fe19c9ec6e9ffda9
+        - 4c60877808f4318ef1107fbeb8f89afa
+        - 4cc43a222a0f94910728b62b97a8c5f8
+        - 4ce8b55b4bfa4659184e7becc1fba3f2
+        - 4d9fea3499bdc22aa4da4e339365f215
+        - 4dab98ca6cd6d3df586203cefd28a042
+        - 4dc2e811a1760953cb7c6a590b498943
+        - 4ddeb3e828550cddc8d45c8bc36ab2d1
+        - 4e2627090e6e5b9fabba883a37897683
+        - 4e42581f08e8cfc7c090f930bac4552a
+        - 4e92348462c75b6c842b994ce84a0ed4
+        - 4ea2f12dbe91deeacd2c1e74f069a6e6
+        - 4f0d637c1197fd65405ebd755ac9f86b
+        - 4fae87d32467e18eb46e4a76a0a0b9ce
+        - 4fe2f67634d00c021aa01f96b6f2d68e
+        - 50770d25768b0486d89be26afca3108f
+        - 50a7e551a7b3f8d37cd6e32d8bfbe5ea
+        - 50bf89f1349bc0409a268c3a49678009
+        - 513a54369b6a8a6602fcb0e129c6d78d
+        - 519a7aa428f18d125a283cf8c014fdd6
+        - 51a04a8a6bdcb23deccc82b0b80742cf
+        - 51e0557bc7b86de13e946c60ee91ce39
+        - 52454f90d4c30c016768db02f88c1a74
+        - 52831e5990d0771cb4951d6f12928167
+        - 528ce32f560edd11add4169f6a5b65be
+        - 52a50b42accf164f9f019941e5759d9b
+        - 52b53f7061969fe471d119b6195da864
+        - 52f6f9f13ba19504c02781132a049e75
+        - 5305693ffae2d3463377b1f6fe67b15a
+        - 533d46c1b06970e99f09523a61df4972
+        - 535bf14f36346c7f59d87cece104d70c
+        - 538caafddff204241cecbf3a02e6b3cf
+        - 539ed9e19811677513447759be5eccfc
+        - 5415337f1863452476d42d9f14a16a61
+        - 544863df86ed3b78a04e0820d41430ee
+        - 553a440137d6e0cf776aee0bb83ac9f5
+        - 5566627eab3fe93fd6ee08798226101a
+        - 5587130f9850696ed7fafbc91c2cee44
+        - 55c96925041a14097b6a7825554f4ad5
+        - 5659d77e8d90378e39b960ad5956f64e
+        - 56f413900b5166ab4d730e9ac0b12cb0
+        - 570d4583587a5fe2d47c7be89b91ad27
+        - 5741dc2bf5044c34d0698681c5081bed
+        - 578fa3a9cb6b6dceab39231ad59cdaca
+        - 57a834594e1e9e9219603bfec184eadc
+        - 57df9869a600bd6b7c405f2a862eccfb
+        - 57fe6232e67823593374a2281d7a8af8
+        - 586a871d4f1221763fddb6ceefdeb95e
+        - 58e4b302b54937e55a678c4d15111da4
+        - 59bbc819b99a733f02f0d6b49d1c253d
+        - 59de1d4c8c057c2a53acd4ca66531af2
+        - 5a32c398a06c345440bf2a683b017ad3
+        - 5a4236931428800e9d9cc04af0987118
+        - 5a9b3bcab695173c820e53934574ae80
+        - 5a9c0859cb00fd8aa4db443837f0a700
+        - 5b92bfa4120daa27c574daa2e386c693
+        - 5bc237df65098fe211bb4818f4d26d78
+        - 5ca5d579b5857ee8709479b1047cecc3
+        - 5cf1ec37aea089f45110c70653a166ab
+        - 5db42a6cd9bf1bf0d3aab9582767f168
+        - 5de1c80811ce7007f62f00d971236c09
+        - 5def4c3732941a971cba8fdee992ede1
+        - 5e063e85d44b0f5c3e6ec3131103a57e
+        - 5f0057b677eb963672bf05dfa3f16c34
+        - 5f57db27027655e6c6a391601daa0258
+        - 60da8bfa7eebe230b7d66ac4082d79b3
+        - 6187a137b2af59dfdbad8d9f8c373c14
+        - 6235903333ba7de1928c869e268e5964
+        - 623ad9d0c1e14bb5464a8c72bff7b4af
+        - 62de60d81c55c29d76a6bce418b31cef
+        - 630008e0f062605a415d694489f6f82e
+        - 63272377184e969942f7fff221be858d
+        - 63704069d9bd3a75c1cf59babe56004a
+        - 63b9ae557efed31d1f7687917d248a8d
+        - 643c01d7c56a724bec0454f4780e8a3e
+        - 651530bf5c607240ccdd89a30c9c9712
+        - 6548c2550b6e2d8f18053216e1c7b6f3
+        - 6561d6bf844e464b4019442692b40e02
+        - 657969cca82e884d272385ec0ef06edd
+        - 65c255b299faf2d12050937cc219c46c
+        - 6601ee6383e7f452be71929f8de48bbb
+        - 6614814a00d344b846ae209f95ee7e3f
+        - 661ad5fcc28cdfb8bcadb12bb2272475
+        - 6624bc09786f0e41ae48dfc5eeb1a9e2
+        - 668bf321538e5072858eaef6087ce027
+        - 674207551483fec113276b67b0d871ff
+        - 686886775c8f6b1191c7b953fb52708c
+        - 6902157ee16728322d61a1321fa79e58
+        - 693660429f9dc4ff704eb3d88dad54d7
+        - 695051e2981c8b19e77cafe450d5bdf3
+        - 698624c6632eeba1774924dbea24c700
+        - 698f5fa55a5f73d0740e9d9a773e8093
+        - 6a3139c7bf09ece22a4713d956acbe5e
+        - 6a53b90c3ad9e0b56d9fe5c69165fff5
+        - 6b2612338467c08c9b25f0cc55b1578d
+        - 6ba4733aa33f6386e9fb0c0fd3993b38
+        - 6bcb2352a2a0c38b845f598298ab9d26
+        - 6c77cd583b36a13aacccf2b3ee23e233
+        - 6c9875b2f94ba781186f0c1aed8d1687
+        - 6d04126aba80df143fd038e711b8fd96
+        - 6dd7dce75cd55c1ce255dc38d9f0cd46
+        - 6ebf4eceee4dd9847201c82e77ef8123
+        - 6ee85be3693ed79a8e80718743d80655
+        - 6f1a1263039c76e68f40a8e536b1da6a
+        - 6f835fd4be26989b1b064399da346143
+        - 70126eecc6aa1274392a1743866e9678
+        - 702835e4b785b67a084280efca355756
+        - 70c0fda4c313d87115644d39e62eec60
+        - 70ee69419916dc13e3aed619061f996c
+        - 712efd3b68f9686dc856b84abd0f21ae
+        - 7178e1eaa97257d8b6d4b80efd77a025
+        - 717b78b0950b51ed00b1471d858b0edc
+        - 720e6cf846ea7572cbb66b743fb91e6c
+        - 72146da5774cabf2632faedcae097a76
+        - 723a46b89fd5c3ed78ccdf039e33ac63
+        - 72c73be2b085b9d57650dd53eb2004c9
+        - 7315baebc0572ff220d226283dc66728
+        - 739c7d7be81f63812dea0d1b1451c651
+        - 741f8c587cb4248ebc5b779a0e8e0e51
+        - 747c1cdcd1737dcfbd1547f6eb6f2cf3
+        - 7494d0dcba8551df6cf37f1b905dc2f7
+        - 749e7cdabbaf72f16677859e27874ba5
+        - 74a9b9bddf14ece02beb81f52c41a88d
+        - 74c7dec0a384d8a05950e629bd23bde9
+        - 751e274377499a8503fd6243ad9c56f6
+        - 75fdd0a732287f9497b179f6bd445d32
+        - 762ed976527cddf02787edba70fffa2a
+        - 762fafdaa57a532ee0119731697579dd
+        - 76623fde66e6b63b59440fd34160512d
+        - 76d336555bb25f3165d2f0d6da719c40
+        - 77128dec4bec4878c37ab7d6169d6f26
+        - 778323240ce2830d68aab11794e00bfb
+        - 781a66c0d89e30814d49fe8b5e14cd07
+        - 782f78b632a43875dd5b53e3e49c9564
+        - 78813699ffac347fe27dba345a5f1551
+        - 788f22bafdd7ab0e1e79f19db72f16a4
+        - 78ba5933c21686d1c2f64669c8c459e7
+        - 7963e546f34e098b578f9ad102494601
+        - 7994081388d55b9cf976c050653dd359
+        - 79b93a308a97792cf53ac75f46da00b5
+        - 7a704e63bb29c446869efde5d57524c8
+        - 7ab0dd5487bab2dc835337b244f689fb
+        - 7ad41305e96a6cab8294cd65891e9a86
+        - 7adbd3210a7b3cc2235e225eef33574d
+        - 7b3447b497e55af8c15fc7bd89d7b81a
+        - 7b3f6ce5c6c22e9b96e7581ebf0df6e1
+        - 7bb8fac2913a6064ec412e583c6d8b4d
+        - 7c4402417d51474d4d0cda9557340e40
+        - 7c462184585ae80bd6e5774c62ce50f2
+        - 7c4adcc13272c0e26fa23aac642adb7b
+        - 7c9130f5f3729edd32aa059141d92484
+        - 7caa63f175b1cecbfaadd8b5ab9998c7
+        - 7cb946b1ad19faebe28c3e86c2794ec3
+        - 7cf4ea70955b00d6b3c22542598e2715
+        - 7d484ca289afaac6bf5fc6a1e96d2226
+        - 7d7866a99a8656a42c7ff6352a433410
+        - 7d81e74a4755b552267cd5e081563028
+        - 7d948535954aaf8c5d39db007f74372e
+        - 7f02656561b680def9986c0795a8a080
+        - 7f5e4d5efad7e44b91115dd1decb65f3
+        - 7fe21dd00d2f4943ae09525efa2fd674
+        - 800214c63934acd05d47e84214db8ba8
+        - 804287717b9156fb7a787acd9af4fac1
+        - 8060d731897e33b5c5ae575ce1e209e1
+        - 809413606dbfe5deefd2db646693ef67
+        - 80cfd480be3eb6d6267139f5cb793555
+        - 8132b9bd16876e1b0f8808d43825dd48
+        - 818d28f936e791926d33bcb6ee94ef79
+        - 82921991ff5b557b045605b8bbf08d49
+        - 83c8aafbefb034674a70de0eac5b8954
+        - 83f2b4881141ce3fcd4e985125d3279e
+        - 84c945f15571830c1a91a33978e94009
+        - 84deb808079d1be601c209c1e771b1cc
+        - 85e7c62c1d6ea078c3897424f867a7c8
+        - 8629a7efec1aab257e58cda559f03ba7
+        - 876182d1918783bbe15233febfbd4926
+        - 87b4428a334b8f676fd9a7f3bf544fb5
+        - 87f3e35268860433e13d577825aada95
+        - 880ce4951cf857ab1d9e0b75c1d856f4
+        - 889009a0ed0bb52c87819941192931b8
+        - 88cd3681e0a2ba85e190f7d817629c4c
+        - 89757206b887aed36f3e18d858460fea
+        - 89d9a386b0b6e5fc8403071b03f7206a
+        - 89dda63a3c907c468ec88c310ed91213
+        - 8b11118053756a9a2932f447e11fc1b5
+        - 8b181ee5518df84f18f4e1a43fe07923
+        - 8c351ed7c326c62123318f4f3246e906
+        - 8ca5b19e0263150d2c57afdde2b3d011
+        - 8cb7c5ddf41f4d506eba76e9a4702a25
+        - 8cf21434553b02cbd37c0bbd07e041b0
+        - 8d92f3ea807b89465643c219455e7369
+        - 8dd386be0767c330276ea6a3f96532d3
+        - 8def3db7f272735afb2ecd03aeca09a7
+        - 8e34331b7eedd03be4e5d965c1956225
+        - 8e4f041ff58e7845456d3482524014b3
+        - 8eb88b0acb3f90a717ad659221471fa7
+        - 8f0fbe2cd4d472157dc1cdef6edecaa9
+        - 8fb67a334bacec338885b4e9e1708073
+        - 8fbe2ee446b97e128471be4ce983dc0d
+        - 8fff28c4263ddec387f28d237fb42773
+        - 902c99f1ac505c0d18778b61bcd636f7
+        - 90b36c5aeb728d5504a39f435bef0c5f
+        - 90b57083da5d803237da74daec6dcb2b
+        - 910a922b426b7ff95eaee129ad6c0e1f
+        - 913fd0ebba70bb919f7254a02239173c
+        - 9140ef75cc8211c4035935e80e567204
+        - 918f6fbcf3ab724d805867303e593a1b
+        - 9200e6ce317b67196b6b0bad4d4bd567
+        - 929f342384a6607afe143d789ade1316
+        - 92c8bc6e8f925792247656fed09aad65
+        - 9315e491484b1b0081ca166fc164108d
+        - 933446e9a59dece7ae9175103820ca8f
+        - 934ed5cd1b9c1c7382d0a94a94b9e639
+        - 939f6e231201f26803cb5c3a3d2940b3
+        - 93bef6edaa84956e8e575016449b6351
+        - 941554c5757b73ba0e50aa7732310afc
+        - 94165aea8a35c3c21499cbcae239b16c
+        - 9523fb39dd240aa958e040f8183d64f3
+        - 954e95f20808d7e5d11f0de292d078e0
+        - 9558aa23f77a9e0a0eca83540999f43b
+        - 95cca791657aabeff15a07eb152d7841
+        - 964ff64dc05b13811c6d0f41e0aa5f6b
+        - 96e5dc09087bad639b4ee193104ec2e5
+        - 96f7c797de9ca20efbe14545bed63eec
+        - 97e50a621f8e801f4baf69e08687c192
+        - 98dddbc4601dd4443ca174359b237166
+        - 98e164d549402270247f3c96a1a158ef
+        - 98f52e1020fe788c10c0418de4393fec
+        - 9996ae921c50e8dff411ac69c0b4bb8b
+        - 999f6d9a1c7c81f43be44c6b7d076210
+        - 99a25c39b28a74d1151c35c18d178292
+        - 99cd94252748d2bdde08e17858233602
+        - 9ac75591b69c3402684b6ce0310f22ee
+        - 9b1f656ca3060f8af17a50d8a024b533
+        - 9bade61a92bed55a25d2b67b9f4ed739
+        - 9bf11dfc0bec77e5a23028043c3c5a8f
+        - 9c3a1c416c765687bc79a04113269929
+        - 9c54608f0996c32ae4743089d915f845
+        - 9c57bc60cfad5ee62d35d3f1ce4593a1
+        - 9cea4682e16655f7da87f406902e989e
+        - 9d213f303afae4983637247556438ede
+        - 9d69ba0a7a626a64dc5db08e529559cf
+        - 9da15f4a4ea758d9eeb49000dbe57e22
+        - 9dd459b29a14bf89d47183cf2cd0e4c7
+        - 9e25199f6ef7e7c347120ff175652c3b
+        - 9e7c5f4d7770eab65738cca38f9efccf
+        - 9e94fa26a70ede4d26226e918e8706a2
+        - 9ef932e837d8b7f392c0bfee9d359dc2
+        - 9fbd5666d8618fa571c4230fafa09bd6
+        - 9fe7c6641c79970ab48185498f547c09
+        - a09a13f18ed27932d08438aa6f12756e
+        - a0a14e50070f3225b3eabba5b85da517
+        - a150c540f572d0fb53992264bc5c10b5
+        - a154d7316f158bb42e6fa18bbe3afd3a
+        - a1bea9970d8f65b240555f99c2214f7f
+        - a213f1bd6458f4a158f3746cb2514559
+        - a218df5c097b0ca409cfaac1488cc7f6
+        - a2a41aedb70551d4a85aa04dc2fced48
+        - a2b911e9ad40dc7d61c142a4683e2d85
+        - a353b1083c9863d756d9404695016d64
+        - a3b0df0065e264a91b7bbf5f844af5cd
+        - a3fa18b3f688ec0fca3eb8bfcbd2d5b3
+        - a45765f8afb1e594b22bf9e974b46765
+        - a4b8d97cd5d3674eeff96abc99d8ed67
+        - a4fc6eadaff1576af888509a53420f6a
+        - a56a8043ebf66e42119618fb8cf232c6
+        - a5dd1946fb63ada8bcaa0c9cd8f11e22
+        - a5ff20ff766e7f50bd5066f33da14413
+        - a61cc04793308395a840807104365121
+        - a69aa24cec11168e7e39a3fbc727e925
+        - a72f15980dc3e9bfd1a49ac9b2f3af65
+        - a7b7354cc588f7566a848bcbb1ce3d96
+        - a7c53f6b3b61adbdaa99dda97e8cbd56
+        - a7d0f8dd44f57ef6de7f7f02e3d82630
+        - a89e143d5211473ae18db9577ee34b64
+        - a90a5da8b09e44264a177c0374a5ac87
+        - a9415cf907dfa12f9ed18693244f5329
+        - a9b533a26e898b12e8b8d4c07279bf4d
+        - aa17b35ce4de7b565be3249ba838944f
+        - aa1eb17b9fdf6dfd546e25c45c7b9235
+        - aa2640d851ec322526f1295bbeb20092
+        - aa8af66c623d7d544dfe4bb85b5ebe3b
+        - aae5953b9edddf14749c0d65d60eb4b9
+        - ab75b89cc49c9ab3160d0c91565a442a
+        - ab91571efab27993ff2f6b36e38055c3
+        - ab9db4cf53b08b828b64dccaafc2d9f0
+        - ac9b01377919cdbd2a1bbb8d5837c70b
+        - ad14615bdd492b01b0d97922e87cb87f
+        - ad8b531ae67582f096925cff5630d0d1
+        - ae9690c6e8fee182c28c9ff8e11ca52c
+        - b00af24704019bd2e1b335e70ad11f7c
+        - b01c2b7b8599b325103ebcddc67413e1
+        - b026643914f651e8371425e5b8a1e780
+        - b2f4d63c7203f539a78252565ca32257
+        - b3809b8d4394588a47c8470ea331e135
+        - b3e2faf2c1004d674f16a3aa3197f0e1
+        - b416191c9813d821a295cfabafff4161
+        - b452cb0ae35044c4a53179c39f49fb06
+        - b5b800c4065bebf4d3442311c9857344
+        - b5d034ac251546e25afe9067f05c1539
+        - b5dd7151a92ccaaa282cbe9681a05f44
+        - b5f0712d22a873b6797ab6cc65c3fcba
+        - b5f49fe968dff6b112861e6cd8e192ef
+        - b6f52e346160519c24a23af05410ad32
+        - b77a27b1864483e721dc831d5ba4afa0
+        - b7ba853e9551f4558440881fd3e5c815
+        - b7e1750c1157341d2abd0251e07c186b
+        - b86a47b3366e3b5424a7b225781f4908
+        - b8d890108a7a80e4f5d59eea9f362438
+        - b906dd0e57f282c7089171b6ed07982e
+        - b9de031b671cd48b28fae9d828cbf2b4
+        - ba8e85df286308fe68a2ce83a8f8b2d6
+        - babcc0ab201e4c60188427cae51a5b8b
+        - bac44fa8e13424950488659b5f765c41
+        - baeda7047354773262ba2405f97038ba
+        - baf15155e37ef5492731459bdc05be8a
+        - bb3dca718920a4d7ec3cc9ffb025108b
+        - bb7ad8a45c027be8ab075b8e465f8ca0
+        - bba8d0c234a52b87b3957037a215d1a4
+        - bbd3acfe6de99892e73940d3fdceaf68
+        - bbf4a892cac7b82422baa711dffb8997
+        - bc8c8d665ec4664d286be0d521722b19
+        - bca9230d3bbb4efa51872bf605a2f1ad
+        - bcc9dd23e2a8bd8267cf92b19304a1b9
+        - bcd2d7510d58e293f20fad6438c1b314
+        - bd0a1b0aadca9a83d9304f7e8ff5fbd5
+        - bd43e172d599bed47a85da877172ca8c
+        - bd4ff04377f974574f7f0bf9d6ce7dde
+        - bd65d163ded559eb90a10cd09fec178f
+        - bdf0d02d36a1d839d0c39c4a887cdd49
+        - be1e9e378700cecaa4ebf71433d7915c
+        - be67f78487e2cecb0d55bc769709e4f5
+        - be7a093e5b4d147b36b72bb1f9e415e5
+        - bee36b4f9a2b9fdcaff6ec05df202ed0
+        - bf0045791395e66460eb04749c68672a
+        - bff9deb0ec77d437f3305a79cf25529e
+        - c04d70d515d15a7e3db3a73320598566
+        - c092292535a57dacd95a8765f5518f87
+        - c0aff2da32c17759d30b22fb0af6649d
+        - c0e0b73d039eb9a99b6ce4cb7a429cd3
+        - c0e6839516f5398edc34adf5f1d53d1a
+        - c0f3eea2e14555b6faeea3dd58c1b1c3
+        - c12d7463a579237ffb9248bd7cff378b
+        - c13fb473e7cb8b83ccd543c094df0608
+        - c1552b1dab6e6f760950368ae61fb600
+        - c161d1327ebc3a156c09582ab2f59f6c
+        - c18309219e789960add0b2255ca4b091
+        - c1d1ebb4745cc43cb6f05e9c8a705c9a
+        - c1dde11f12d05c478f5de2d7319ad3b2
+        - c240c4061717ac1806ae6ee72be3533b
+        - c26ba52cf8d2f34915f2f6b7ffa0a3f3
+        - c2bda99904207edd1834f03e0022b007
+        - c32fc744b9160ac853450488e3cfea93
+        - c353f8fc0ce8344999f17d578eb69a5e
+        - c360e4787614ed31ac7a2f95d3b22dc6
+        - c398bc00a606d33758afd91f4e64fd15
+        - c3e2398fcc7e581cda2e546557bf6968
+        - c3fe93ba3085f92855c97e57f38c8c05
+        - c43d924a0f1688ee9fae0efcd6f539d4
+        - c5e60e39c0f42b8e827daa13cff74afa
+        - c6381b1321d7d97717a5bb4ed5b77882
+        - c716e0b86ed568878475b60fbb6323ad
+        - c7246702dc991a06d788120dc7544391
+        - c747d5b92c7648417faea95d36d763e8
+        - c74f14c1e26cf1bd5bd34b6a1e274426
+        - c7bb64409aa480bb7d0335faaaf3d242
+        - c7c7b2682c648339a0e9846bb1023a39
+        - c8143b3069f6746a77421b5ce30a450c
+        - c8665a4dd081a2c436b1cd921079d0d9
+        - c8771b1a10bb99bb34d3c459c5cffb53
+        - c87abc38c8ed3240861729e1aeadf221
+        - c963a25b8671419c6ce9eebe8fd03218
+        - c97aa4ee7420f937da13b7f9e2228b99
+        - c990d6cf976a5718aaedc539f383ab88
+        - c9d2ba8dde44a275ae06475ed1d2fafc
+        - ca5832c6960267b71041f74bb39e8b12
+        - ca7c6bd577e559472af1c699de9e764e
+        - cac4e0bc1a3269fa2b6ea5e763f6115b
+        - cad10cc982ab6a391570c211b995c17c
+        - cad9969167c09b48ae6f1d123f7fa68d
+        - cb162c8eef257253782d245c08d9097c
+        - cb5ff1b9715e99589f3e0c7a6afab9e3
+        - cbbd5ae8f53de5f5097cd8217b529e24
+        - cc1f04647be106ba74e62b21f358af25
+        - ccada0ef508e698917a6eab263375905
+        - cd233f8bfa30ebfd651f47ee7d054951
+        - cd52a8efd71af3336b14b5039b951cc1
+        - ce33c6211beaa8fef4cae8b52db39862
+        - ce3ad9de960102d0677a81f5d0bb7b2d
+        - ce4755084bc097113867e6454f8f5e52
+        - cecd97bc34ed8330bd4cd15713eda670
+        - d180e07dc1e58c31c3f0cd599dc4d945
+        - d1aa1ec0839dcab73a6161130eb1f94a
+        - d26aa40b90272d4843d63be7c1462c8d
+        - d297f1055de2956aedfd3b04113dce3e
+        - d2df77822373f19934e87694d8640767
+        - d3891911c2feae53c52fea2bd14054e5
+        - d3e7d37c0df9aef383f3f2a15b0dddfb
+        - d4828feed4cda2cd9d6b37899a95a71e
+        - d4a5e99e0dd915df64ba55a7fbd583fd
+        - d4d99b60c4c94cd35acd502cec65dc8d
+        - d4f91e8be86b38da2ee35bc489645a9d
+        - d52cbce9845184537284a23c3bc3da0e
+        - d58d521f3789def2e7a22715e0badd93
+        - d594982fd877af63ace38ea1fca27c76
+        - d598f929fc44e1e38678e7f47250ec04
+        - d63f306de130e0391d38a792541723b8
+        - d6cd01c59123df02fc226eadbadb5f89
+        - d7ab82074b5f1dfba46db123df101bff
+        - d7d517afce974cd491b8d52bb5b5b1fc
+        - d7f1cfc638473be93baedbfd02208016
+        - d85efbc8eff2b7adf524e2820569adc8
+        - d8b8f2cf9ff6ba0389072541cb42498c
+        - d8bf0fc082fd4a77fc2e5679b6c00133
+        - d8d9567d0bfb0bc7eb845a205ba42657
+        - d8dd176509baa37f359644d082bf7f7b
+        - d93b8458c6fe139d85cfa5eadbf55bd2
+        - d9b00a97818674c7f8d8b1ef0e689679
+        - d9c349beabc06aa6ff1c6d68b5e9e22e
+        - d9d43faf741ceaa8da52fdbb81d9e0e3
+        - da2782c804606d2a5d8e1760dbb3e7ec
+        - da3fede3469bf49b7293ce3fc45b294d
+        - db1f0f7c7e5e87f40b62226f020bb297
+        - db6a4d4b5f1f5f98820ce6ce2619e2de
+        - db7ed69a53aa9fb1c01930ba54a88bbe
+        - dbc51f5e45d654ecc16cb68e6817ecea
+        - dc120d932ddf9d4dfb6fd68beefda622
+        - dcb7367a92f5ffb89f1e2152ed260285
+        - dd264199fc8b687ad029de7de6d760e6
+        - dd39ad39b5d3df33037e141c72497ba6
+        - dd5450b022b2d00a2145a66331e1aef6
+        - dd8a29ce82d5c705ba932d81494600a5
+        - dd9661d3cda1e6feb237f0c4d8b26f2e
+        - dda37071807e404c5bb2a1590c66326f
+        - dde698c6d0bd24834c586e5111c2bba7
+        - dedcab67899479e4ea5dcc4eba47f587
+        - df683dfda87bf71ac3fc63063fba369d
+        - e00d85ce20ea50c1224c66ca5050527d
+        - e0482f2c769468c3bbcd8a01e09d98c5
+        - e0487761face83d64fcada2408959a36
+        - e09887ca8c7bf8a4621ce481820414ef
+        - e0a3c37054ade6478d923a6efc10f308
+        - e0b162a693bc7f9eab00f783a31d60ea
+        - e1643dff33666ca629e3644c02738179
+        - e1bed63d68ac36fe1f3061befe196af5
+        - e3e290b38963293022cdcd6db8328103
+        - e45edf75f568ed2f93f78d060e246e25
+        - e4f121bf6ef8b9a1d4d3e65dd0473fab
+        - e4fc40017a6d22c46a14ac2e17f87c3e
+        - e503f22be6a4f456d9851920a5d9c670
+        - e5545d4d4473876ea78c5bcebca365c3
+        - e595809a6c31ec4314fd06ef198c244d
+        - e59e575a175fadcadf8479e191770425
+        - e5bd51692380fd8cabb19b756b95e714
+        - e5c84227854980f1db19a58958c551d9
+        - e5d4b2b0c3bca22085f7a19a28de0c42
+        - e5def42655b7490edac5a56fe8e9e603
+        - e64ddbe1cbcf4f2fc3092b7c481f3f9d
+        - e72b4feb7abe210c52aa667abc25a3a2
+        - e732329483fd5f27367dd997b47f598a
+        - e76ecc7e9a1a1e3c6df9d2a8261c423d
+        - e819bcfade7b5d88a27325eb6cfd62c5
+        - e82de6494d91d3c4c54450f59b227a94
+        - e88165a185134e13fdfc85d4fa654db8
+        - e8ff5a6ceb895583033fc2a0f314e3c2
+        - e9874ae10b2d60d43917b6bbfa13a599
+        - e9b6c33b71b67737693b4cfa68341c8d
+        - e9c2dc0dd4ac38448289be644ac94f42
+        - e9e446d01bd10a97a8ffcfc4a3a20cb2
+        - ea846a0e7ad98a741783e886d89dfa44
+        - eaaa46e98c9e61f6764dd1d7a2ab8b3e
+        - eae9af4811c294c56795d70e715b7337
+        - eaf6d55068dea77334e8477d3878d89e
+        - eb1bf309f4f6af9a97e9ddac3fdbeabe
+        - eb4a59a06b3948e851a7d7a830bcbc42
+        - ebe3dabc4955c9b0d695e7bda38bf5c3
+        - ec21206b7894c503788a684a7bc822a6
+        - ec2e006556300a79a5a91e4876ab3a56
+        - ec5c1d94df153d473b37f880977ae58e
+        - ed49da7cadefc454d6a67de249eab240
+        - edb58a1390adf273840030a3d6253829
+        - edb65fe661681b1c0de8bd47c8655855
+        - eec3469d83e142f9a104886655338c37
+        - ef728fa1f17436c91ed1ccd03dcf9631
+        - efb628aa07c8ca93d7db0d85b91a4f5a
+        - f049a72cf58fd31b11f8919cade515e7
+        - f09b760d23495ac9a7e00d29b769007c
+        - f0ec78809fe0bc3edb11c9fe5b97b059
+        - f114dca2828bf718548db175ebe2cfcd
+        - f19516b9ff26bfeb091b30108db4ddbd
+        - f1ce5fdecd64935c28b9ff932751d0dc
+        - f1fdf2d13186575751aa25876536d85c
+        - f266295f49a28eee21f413e0cbb0521d
+        - f26d70155c2b6326fcfa1780c8c684e4
+        - f3041c2e75ec683697a6a5ea82192210
+        - f307937c1bb287c3efc2a514b94b0d1d
+        - f3511c85f59f8dec53d140501ee8e7a8
+        - f356c348fbc8df6a882823e21f5ce8b7
+        - f35becee938e982bd615edf8ef12bcfb
+        - f3862c2188522d89860c38a3ea8b550d
+        - f3975e8a41157005d4bcbb358678cd9b
+        - f43827dd686be3a4a80e00aa299990fb
+        - f5b84683a9bf9e1df748cf40f601b39c
+        - f626e15b7314c267e4429010866f70e9
+        - f664f98bfda2eaf266a23ff144e7a872
+        - f7c31656c19db6275a8acadca289f426
+        - f8e2c1b59cd4225a3e4fd0d013a76b93
+        - f8f35af4634605e6693c17cc3ffff5a8
+        - f90f77ef2799a27f80d90c425ca944f7
+        - f92d8c817434bd2d84d4e9c61322b7fa
+        - f9f68daa2af419d38f745478bcb3da1a
+        - fa5fdc4e4bb6bd1009ad0e4ac4096562
+        - fa8d335d68129e464e60c1826a683e96
+        - fb503a924a0b9db19d83dd0ac6dbef8c
+        - fc0b214b59a83615fea981c6424a02ae
+        - fc38b5dceee1a730fad8853453437fbd
+        - fc5a0d7a310a7a41abf86a458585ff2b
+        - fc6295add6f51a0936407ead70c1001d
+        - fc908879b9ca1bd65419e54e50432d38
+        - fd312b6bf05efac6c3772d5b52205d8a
+        - fdf736c18c589ed030e058312203e1b2
+        - fe19dce63ae80346207c6c55713d1023
+        - fe8055980a4ff7f64ed889c2b5926929
+        - fe9d9cf8631285d5982c6e2cf27fb114
+        - fedaedd3ca31d56ab33e92035e4b361c
+        - fedf2c1386e137f296b3bbf3b635e69d
+        - ff82e8873fba613f2261a9acc896fd84
+  tolerance:
+    count: 0
+    seller_ids: exact
+- id: q005
+  split: dev
+  type: ranking
+  question: Where do most orders come from? Show the top 5 customer cities (delivered orders only).
+  gold_sql: evals/gold/dev/q5.sql
+  expected:
+    key:
+    - customer_city
+    - customer_state
+    rows:
+    - customer_city: sao paulo
+      customer_state: SP
+      orders_cnt: 15045
+    - customer_city: rio de janeiro
+      customer_state: RJ
+      orders_cnt: 6601
+    - customer_city: belo horizonte
+      customer_state: MG
+      orders_cnt: 2697
+    - customer_city: brasilia
+      customer_state: DF
+      orders_cnt: 2071
+    - customer_city: curitiba
+      customer_state: PR
+      orders_cnt: 1489
+  tolerance:
+    orders_cnt: 0
+- id: q006
+  split: hidden
+  type: numeric
+  question: What is the repeat rate (customers with a second order / customers with at least one order)? And the 180-day repeat
+    rate (second order within 180 days of the first)? (customer_unique_id)
+  gold_sql: evals/gold/hidden/q6.sql
+  expected:
+    customers: 93358
+    repeat_customers: 2015
+    repeat_rate_pct: 2.16
+    eligible_180d: 54056
+    repeat_180d: 1074
+    repeat_rate_180d_pct: 1.99
+  tolerance:
+    customers: 0
+    repeat_customers: 0
+    repeat_rate_pct: 0.01
+    eligible_180d: 0
+    repeat_180d: 0
+    repeat_rate_180d_pct: 0.01
+- id: q007
+  split: dev
+  type: ranking
+  question: What are the top 5 best-selling products by delivered revenue? (product_id)
+  gold_sql: evals/gold/dev/q7.sql
+  expected:
+    key:
+    - product_id
+    rows:
+    - product_id: bb50f2e236e5eea0100680137654686c
+      revenue: 63560.0
+    - product_id: 6cdd53843498f92890544667809f1595
+      revenue: 53652.3
+    - product_id: d6160fb7873f184099d9bc95e30376af
+      revenue: 45949.35
+    - product_id: d1c427060a0f73f6b889a5c7c61f2ac4
+      revenue: 45620.56
+    - product_id: 99a4788cb24856965c36a24e339b6058
+      revenue: 42049.66
+  tolerance:
+    revenue: 0.01
+- id: q008
+  split: hidden
+  type: numeric
+  question: What is the average delivery time in days (purchase to customer delivery) and the count of late deliveries (delivered
+    after the estimated date)? Delivered orders only.
+  gold_sql: evals/gold/hidden/q8.sql
+  expected:
+    deliver_days_avg: 12.5
+    orders_delivered_cnt: 96470
+    orders_delivered_late_cnt: 6534
+    late_rate_pct: 6.77
+  tolerance:
+    deliver_days_avg: 0.05
+    orders_delivered_cnt: 0
+    orders_delivered_late_cnt: 0
+    late_rate_pct: 0.01
+- id: q009
+  split: hidden
+  type: ranking
+  question: Which customer state has the highest average delivery time? (delivered orders only)
+  gold_sql: evals/gold/hidden/q9.sql
+  expected:
+    key:
+    - customer_state
+    rows:
+    - customer_state: RR
+      delivery_days_avg: 29.3
+  tolerance:
+    delivery_days_avg: 0.05
+- id: q010
+  split: dev
+  type: ranking
+  question: Which customer state has the highest late delivery rate? (delivered orders only)
+  gold_sql: evals/gold/dev/q10.sql
+  expected:
+    key:
+    - customer_state
+    rows:
+    - customer_state: AL
+      late_rate_pct: 21.41
+  tolerance:
+    late_rate_pct: 0.01
+- id: q011
+  split: dev
+  type: ranking
+  question: Which seller has the highest late delivery rate, among sellers with at least 10 delivered orders? (An order counts
+    for a seller if it includes at least one of their items. Delivered orders only.)
+  gold_sql: evals/gold/dev/q11.sql
+  expected:
+    key:
+    - seller_id
+    rows:
+    - seller_id: b1b3948701c5c72445495bd161b83a4c
+      late_delivery_rate: 0.642857
+  tolerance:
+    late_delivery_rate: 0.0001
+- id: q012
+  split: hidden
+  type: numeric
+  question: How many orders were placed in the last 90 days?
+  gold_sql: evals/gold/hidden/q12.sql
+  expected:
+    orders_last_90d: 19251
+  tolerance:
+    orders_last_90d: 0
+- id: q013
+  split: dev
+  type: numeric
+  question: How many orders were canceled, and what share of all orders is that?
+  gold_sql: evals/gold/dev/q13.sql
+  expected:
+    canceled_orders_cnt: 625
+    cancel_order_rate_pct: 0.63
+  tolerance:
+    canceled_orders_cnt: 0
+    cancel_order_rate_pct: 0.01
+- id: q014
+  split: dev
+  type: behavior
+  question: Why did revenue drop in 2019 compared to 2018?
+  gold_sql: evals/gold/dev/q14.sql
+  expected:
+    facts:
+      orders_2019: 0
+      first_order_date: '2016-09-04'
+      last_order_date: '2018-10-17'
+    must:
+    - says_no_data_for_2019
+    - says_data_ends_in_2018
+    must_not:
+    - gives_a_2019_revenue_number
+    - gives_a_cause_for_the_drop
+    allowed:
+    - offers_alternative_comparison
+  tolerance:
+    orders_2019: 0
+    first_order_date: 0
+    last_order_date: 0
+- id: q015
+  split: hidden
+  type: behavior
+  question: What is the profit margin by product category?
+  gold_sql: evals/gold/hidden/q15.sql
+  expected:
+    facts:
+      cost_or_profit_columns: 0
+      money_columns:
+      - table_name: order_items
+        column_name: freight_value
+        kind: revenue_side
+      - table_name: order_items
+        column_name: price
+        kind: revenue_side
+      - table_name: order_payments
+        column_name: payment_value
+        kind: revenue_side
+    must:
+    - says_no_cost_data_available
+    - says_margin_cannot_be_computed
+    must_not:
+    - gives_any_margin_or_profit_figure
+    - treats_freight_as_cost
+    allowed:
+    - offers_revenue_by_category_instead
+  tolerance:
+    cost_or_profit_columns: 0
+    money_columns: exact
+- id: q016
+  split: hidden
+  type: ranking
+  question: Who are our best customers?
+  gold_sql: evals/gold/hidden/q16.sql
+  expected:
+    key:
+    - customer_unique_id
+    interpretations:
+      by_revenue:
+      - rnk: 1
+        customer_unique_id: 0a0a92112bd4c708ca5fde585afaa872
+        delivered_orders: 1
+        delivered_revenue: 13440.0
+      - rnk: 2
+        customer_unique_id: da122df9eeddfedc1dc1f5349a1a690c
+        delivered_orders: 2
+        delivered_revenue: 7388.0
+      - rnk: 3
+        customer_unique_id: 763c8b1c9c68a0229c42c9fc6f662b93
+        delivered_orders: 1
+        delivered_revenue: 7160.0
+      - rnk: 4
+        customer_unique_id: dc4802a71eae9be1dd28f5d788ceb526
+        delivered_orders: 1
+        delivered_revenue: 6735.0
+      - rnk: 5
+        customer_unique_id: 459bef486812aa25204be022145caa62
+        delivered_orders: 1
+        delivered_revenue: 6729.0
+      - rnk: 6
+        customer_unique_id: ff4159b92c40ebe40454e3e6a7c35ed6
+        delivered_orders: 1
+        delivered_revenue: 6499.0
+      - rnk: 7
+        customer_unique_id: 4007669dec559734d6f53e029e360987
+        delivered_orders: 1
+        delivered_revenue: 5934.6
+      - rnk: 8
+        customer_unique_id: eebb5dda148d3893cdaf5b5ca3040ccb
+        delivered_orders: 1
+        delivered_revenue: 4690.0
+      - rnk: 9
+        customer_unique_id: 48e1ac109decbb87765a3eade6854098
+        delivered_orders: 1
+        delivered_revenue: 4590.0
+      - rnk: 10
+        customer_unique_id: a229eba70ec1c2abef51f04987deb7a5
+        delivered_orders: 1
+        delivered_revenue: 4400.0
+      by_orders:
+      - rnk: 1
+        customer_unique_id: 8d50f5eadf50201ccdcedfb9e2ac8455
+        delivered_orders: 15
+        delivered_revenue: 714.63
+      - rnk: 2
+        customer_unique_id: 3e43e6105506432c953e165fb2acf44c
+        delivered_orders: 9
+        delivered_revenue: 1000.85
+      - rnk: 3
+        customer_unique_id: 1b6c7548a2a1f9037c1fd3ddfed95f33
+        delivered_orders: 7
+        delivered_revenue: 809.21
+      - rnk: 4
+        customer_unique_id: ca77025e7201e3b30c44b472ff346268
+        delivered_orders: 7
+        delivered_revenue: 806.61
+      - rnk: 5
+        customer_unique_id: 6469f99c1f9dfae7733b25662e7f1782
+        delivered_orders: 7
+        delivered_revenue: 664.2
+      - rnk: 6
+        customer_unique_id: 47c1a3033b8b77b3ab6e109eb4d5fdf3
+        delivered_orders: 6
+        delivered_revenue: 836.6
+      - rnk: 7
+        customer_unique_id: dc813062e0fc23409cd255f7f53c7074
+        delivered_orders: 6
+        delivered_revenue: 687.76
+      - rnk: 8
+        customer_unique_id: 63cfc61cee11cbe306bff5857d00bfe4
+        delivered_orders: 6
+        delivered_revenue: 579.81
+      - rnk: 9
+        customer_unique_id: f0e310a6839dce9de1638e0fe5ab282a
+        delivered_orders: 6
+        delivered_revenue: 438.09
+      - rnk: 10
+        customer_unique_id: 12f5d6e1cbf93dafd9dcc19095df0b3d
+        delivered_orders: 6
+        delivered_revenue: 58.4
+    accepted_interpretations:
+    - by_revenue
+    - by_orders
+    must:
+    - states_its_definition_of_best
+    - ranking_matches_one_accepted_interpretation (at least 8 of the top 10 overlap)
+    must_not:
+    - claims_a_single_obvious_definition_without_saying_so
+  tolerance:
+    rnk: 0
+    delivered_orders: 0
+    delivered_revenue: 0.01
