@@ -229,3 +229,4 @@ dbt/dbt_packages/
 dbt/.user.yml
 .vscode/
 notebooks/
+notebooks/
