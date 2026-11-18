@@ -36,11 +36,14 @@ The analyst agent may see the dev questions only. **It must never read `evals/go
 
 The agent answers in the format described in [ANSWER_FORMAT.md](ANSWER_FORMAT.md): a short text answer, then one JSON
 block with `status`, `assumptions`, `answer` and (when it cannot answer) `reason`.
+ANSWER_FORMAT.md is part of the agent's context (it contains no eval values), so scores measure the agent together
+with that document.
 
 Every entry has an `answer_schema` with field names and types only. **`question` and `answer_schema` are safe to show
 to the agent for every question, hidden ones included.** Everything else in an entry (`expected`, `tolerance`,
 `gold_sql`) and the files in `evals/gold/hidden/` are not. `check_gold.py` checks that each schema's field names
-match the keys in `expected`, and that no string value from `expected` appears in a schema.
+match the keys in `expected`, that no string value from `expected` appears in a schema, and that no expected
+string or number with 4 or more digits appears in ANSWER_FORMAT.md.
 
 ## Checking the gold answers
 

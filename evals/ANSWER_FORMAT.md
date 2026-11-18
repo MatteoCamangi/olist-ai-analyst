@@ -21,7 +21,7 @@ Nothing comes after the JSON block. If a message holds more than one JSON block,
 | Field | Type | Rule |
 |---|---|---|
 | `status` | `"answered"` or `"cannot_answer"` | Required. |
-| `assumptions` | list of strings | Required. Can be empty (`[]`). Lists every definition, filter, date range or interpretation chosen. |
+| `assumptions` | list of strings | Required. Can be empty (`[]`). Lists every filter, date range and definition chosen. |
 | `answer` | object or `null` | An object that follows the question's `answer_schema` when `status` is `answered`. `null` when `status` is `cannot_answer`. |
 | `reason` | string | Required only when `status` is `cannot_answer`: why the data cannot answer the question. Leave it out otherwise. |
 
@@ -53,7 +53,7 @@ Use the field names exactly as written: no renaming, no extra nesting.
 
 - Put everything uncertain or assumed in `assumptions`, not only in the text. The grader reads the JSON.
 - Typical entries: which order statuses were included, the date range and which date column, how revenue was defined,
-  how ties were broken, which interpretation of a vague term was used.
+  how ties were broken, which definition of a vague term was used.
 
 ## When the data cannot answer
 
@@ -63,58 +63,54 @@ a related question the data can answer in the text or in `reason`, but `answer` 
 
 ## Worked examples
 
-### Numeric answer (q001)
+The values in these examples are illustrative values, not real data. They show the shape of an answer only.
 
-> How many orders did Olist receive in 2017 (by purchase date)? How many of them were delivered? What was the total
-> revenue of the delivered ones?
+### Numeric answer (illustrative values, not real data)
 
-Olist received 45,101 orders in 2017, and 43,428 of them were delivered. Delivered orders brought in 5,962,902.01 in
-revenue (item price only, freight excluded).
+> In a fictional shop, how many orders were placed last month, how many were canceled, and what share is that?
+
+The shop received 1,234 orders last month, and 56 of them were canceled, which is 4.54% of all orders.
 
 ```json
 {
   "status": "answered",
   "assumptions": [
-    "2017 means order_purchase_timestamp between 2017-01-01 and 2017-12-31",
+    "Last month means the calendar month before the as-of date, by purchase date",
     "Orders counts every order placed, whatever its status",
-    "Delivered means order_status = 'delivered'",
-    "Revenue is the sum of item price on delivered orders, freight excluded"
+    "Share is canceled orders divided by all orders placed"
   ],
   "answer": {
-    "orders_cnt": 45101,
-    "delivered_orders_cnt": 43428,
-    "total_revenue": 5962902.01
+    "total_orders": 1234,
+    "canceled_orders": 56,
+    "canceled_share_pct": 4.54
   }
 }
 ```
 
-### Ranking answer (q005)
+### Ranking answer (illustrative values, not real data)
 
-> Where do most orders come from? Show the top 5 customer cities (delivered orders only).
+> In a fictional shop, which three product categories had the most orders?
 
-Sao Paulo leads by far with 15,045 delivered orders, followed by Rio de Janeiro (6,601), Belo Horizonte (2,697),
-Brasilia (2,071) and Curitiba (1,489).
+Moon boots lead with 321 orders, followed by glow mugs (210) and cloud lamps (98).
 
 ```json
 {
   "status": "answered",
   "assumptions": [
-    "Delivered orders only (order_status = 'delivered')",
-    "Cities are grouped by customer_city and customer_state, so same-named cities in different states stay separate"
+    "An order counts once per category, even with several items of that category",
+    "Ties would be broken by category name"
   ],
   "answer": {
     "rows": [
-      {"customer_city": "sao paulo", "customer_state": "SP", "orders_cnt": 15045},
-      {"customer_city": "rio de janeiro", "customer_state": "RJ", "orders_cnt": 6601},
-      {"customer_city": "belo horizonte", "customer_state": "MG", "orders_cnt": 2697},
-      {"customer_city": "brasilia", "customer_state": "DF", "orders_cnt": 2071},
-      {"customer_city": "curitiba", "customer_state": "PR", "orders_cnt": 1489}
+      {"category": "moon_boots", "orders": 321},
+      {"category": "glow_mugs", "orders": 210},
+      {"category": "cloud_lamps", "orders": 98}
     ]
   }
 }
 ```
 
-### Set answer (generic, fake ids)
+### Set answer (illustrative values, fake ids)
 
 For a schema such as:
 

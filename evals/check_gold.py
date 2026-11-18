@@ -5,6 +5,7 @@ Exit code 0 when every checked question matches, 1 on any difference or error.
 The database is opened read-only.
 """
 import datetime as dt
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DB = ROOT / "warehouse.duckdb"
 QUESTIONS = ROOT / "evals" / "questions.yaml"
 GOLD = ROOT / "evals" / "gold"
+ANSWER_FORMAT = ROOT / "evals" / "ANSWER_FORMAT.md"  # shown to the agent
 
 
 def norm(v):
@@ -84,6 +86,34 @@ def check_schema(entry, errors):
     leaked = {v for v in leaves(values) if isinstance(v, str) and len(v) >= 4 and v in text}
     if leaked:
         errors.append(f"answer_schema contains expected values: {sorted(leaked)}")
+
+
+def digit_count(x):
+    return len(repr(float(x)).removesuffix(".0").replace(".", "").replace("-", ""))
+
+
+def doc_leaks(entries, text):
+    """Expected values that appear in a document the agent sees.
+
+    Strings (ids, cities, states, dates) match as whole words, case-sensitive. Numbers with 4 or more
+    digits match any number in the text, with thousands separators removed. `key` lists are column
+    names, not values, and are skipped.
+    """
+    strings, numbers = set(), set()
+    for e in entries:
+        for v in leaves({k: x for k, x in e["expected"].items() if k != "key"}):
+            if isinstance(v, bool):
+                continue
+            if isinstance(v, str):
+                strings.add(v)
+            elif isinstance(v, (int, float)) and digit_count(v) >= 4:
+                numbers.add(float(v))
+    hits = {s for s in strings if re.search(rf"(?<![\w-]){re.escape(s)}(?![\w-])", text)}
+    for tok in re.findall(r"\d[\d,]*(?:\.\d+)?", text):
+        tok = tok.rstrip(",").replace(",", "")
+        if tok and float(tok) in numbers:
+            hits.add(tok)
+    return sorted(hits)
 
 
 def check(con, entry):
@@ -160,6 +190,10 @@ def main(argv):
     for path in sorted(referenced - on_disk):
         print(f"FAIL {path} is referenced by questions.yaml but missing")
         failed += 1
+    leaks = doc_leaks(yaml.safe_load(QUESTIONS.read_text()), ANSWER_FORMAT.read_text())
+    if leaks:
+        print(f"FAIL {ANSWER_FORMAT.relative_to(ROOT)} contains expected values: {leaks}")
+        failed += 1
     for entry in entries:
         try:
             errors = check(con, entry)
@@ -170,7 +204,7 @@ def main(argv):
         for err in errors:
             print(f"       {err}")
         failed += bool(errors)
-    print(f"\n{failed} failure(s) across {len(entries)} questions and the gold file check")
+    print(f"\n{failed} failure(s) across {len(entries)} questions, the gold file check and the ANSWER_FORMAT.md leak check")
     return 1 if failed else 0
 
 
