@@ -50,8 +50,45 @@ def cmp_rows(label, expected_rows, actual_rows, tolerance, errors):
         cmp_values(f"{label}[{i}]", e, a, tolerance, errors)
 
 
+def leaves(v):
+    if isinstance(v, dict):
+        for x in v.values():
+            yield from leaves(x)
+    elif isinstance(v, list):
+        for x in v:
+            yield from leaves(x)
+    else:
+        yield v
+
+
+def check_schema(entry, errors):
+    """answer_schema must exist, match the expected field names, and never contain expected values."""
+    schema = entry.get("answer_schema")
+    if not isinstance(schema, dict) or "answer" not in schema:
+        errors.append("answer_schema missing or has no answer")
+        return
+    exp, qtype, answer = entry["expected"], entry["type"], schema["answer"]
+    if qtype == "numeric":
+        want, got = set(exp), set(answer)
+    elif qtype == "ranking" and "interpretations" not in exp:
+        want = {k for row in exp["rows"] for k in row}
+        got = set(answer["rows"]["fields"])
+    elif qtype == "set":
+        want, got = set(exp["sets"]), set(answer)
+    else:
+        want = got = None  # behavior and q016: free-form schemas, no field match
+    if want != got:
+        errors.append(f"answer_schema fields {sorted(got)} differ from expected keys {sorted(want)}")
+    text = yaml.safe_dump(schema)
+    values = {k: v for k, v in exp.items() if k != "key"}  # key lists column names, not values
+    leaked = {v for v in leaves(values) if isinstance(v, str) and len(v) >= 4 and v in text}
+    if leaked:
+        errors.append(f"answer_schema contains expected values: {sorted(leaked)}")
+
+
 def check(con, entry):
     errors = []
+    check_schema(entry, errors)
     folder = Path(entry["gold_sql"]).parent.name
     if folder != entry["split"]:
         errors.append(f"split is {entry['split']} but gold_sql is in {folder}/")

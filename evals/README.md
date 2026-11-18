@@ -9,11 +9,12 @@ evals/
   gold/dev/q*.sql      gold queries for the dev split (8 questions)
   gold/hidden/q*.sql   gold queries for the hidden split (8 questions)
   questions.yaml       expected answers, one entry per question (q001 ... q016)
+  ANSWER_FORMAT.md     answer format the analyst agent must use
   check_gold.py        reruns every gold query and compares it with questions.yaml
   cases/, results/     reserved for agent runs (empty for now)
 ```
 
-Each entry in `questions.yaml` has `id`, `split`, `type`, `question`, `gold_sql`, `expected` and `tolerance`.
+Each entry in `questions.yaml` has `id`, `split`, `type`, `question`, `gold_sql`, `answer_schema`, `expected` and `tolerance`.
 Types:
 
 - `numeric`: named values from the single result row.
@@ -30,6 +31,16 @@ Strings (ids, dates) are always compared exactly.
 
 The analyst agent may see the dev questions only. **It must never read `evals/gold/hidden/` or any entry of
 `questions.yaml` with `split: hidden`.** The grader reads both splits. Results on the hidden split are the ones that count.
+
+## Answer format
+
+The agent answers in the format described in [ANSWER_FORMAT.md](ANSWER_FORMAT.md): a short text answer, then one JSON
+block with `status`, `assumptions`, `answer` and (when it cannot answer) `reason`.
+
+Every entry has an `answer_schema` with field names and types only. **`question` and `answer_schema` are safe to show
+to the agent for every question, hidden ones included.** Everything else in an entry (`expected`, `tolerance`,
+`gold_sql`) and the files in `evals/gold/hidden/` are not. `check_gold.py` checks that each schema's field names
+match the keys in `expected`, and that no string value from `expected` appears in a schema.
 
 ## Checking the gold answers
 
