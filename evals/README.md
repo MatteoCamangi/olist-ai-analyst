@@ -77,12 +77,13 @@ run the grader.** Result dicts and summaries hold flags, counts and rates, never
 
 Steps: take the last ```` ```json ```` block (or else the last top-level JSON object), check the envelope
 (ANSWER_FORMAT.md), check the answer against `answer_schema` (exact field names, types, `max_rows`), then score by
-type. Each question gets exactly one outcome:
+type. Each question gets exactly one of five outcomes:
 
 | Outcome | When |
 |---|---|
 | `correct` | Right status and every field, row or set right; every scored rule passes. |
-| `wrong_confident` | Status `answered` with wrong values, or `answered` on a question that cannot be answered. Also a refusal on q014/q015 that fails a must / must_not rule. |
+| `wrong_confident` | Status `answered` with wrong values, or `answered` on a question that cannot be answered (decided before schema validation, so an invented answer is never a `format_error`). Also a refusal on q014/q015 where a must_not rule fired. |
+| `incomplete_refusal` | Status `cannot_answer` on q014/q015, no must_not rule fired, but a scored must rule failed (the refusal misses a required fact). |
 | `false_refusal` | Status `cannot_answer` on a question that can be answered. |
 | `format_error` | No valid JSON, a broken envelope (an empty `reason` included) or an answer that breaks `answer_schema`. |
 
@@ -90,6 +91,6 @@ Behavior and q016 rules live in the `RULES` registry in `grader.py`, each marked
 (keyword/regex) or `manual`. Manual rules (for example `gives_a_cause_for_the_drop`) are not scored: they are listed
 under `manual_review` with the matching text, for a human to read.
 
-`summarize` reports, per split and overall: `accuracy` and `wrong_confident_rate` and `format_error_rate` over all
-questions of the split, `false_refusal_rate` over answerable questions only (q014 and q015 excluded), and the failed
+`summarize` reports, per split and overall: `accuracy` (correct only), `wrong_confident_rate`,
+`incomplete_refusal_rate` and `format_error_rate` over all questions of the split, `false_refusal_rate` over answerable questions only (q014 and q015 excluded), and the failed
 ids with their outcomes and reasons. The hidden split is the one that counts.

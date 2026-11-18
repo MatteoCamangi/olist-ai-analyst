@@ -325,7 +325,7 @@ def test_invented_numbers_on_behavior_questions():
 def test_behavior_rules():
     # refusal whose reason misses a required fact
     expect(grade("q014", response("cannot_answer", None, [], "I cannot answer that.", prose="Sorry.")),
-           "wrong_confident", "q014 vague reason")
+           "incomplete_refusal", "q014 vague reason")
     # refusal that still gives a 2019 revenue number in the text
     prose = Q014_PROSE + " My estimate of 2019 revenue is R$ 7,500,000."
     r = grade("q014", response("cannot_answer", None, [], Q014_REASON, prose))
@@ -363,11 +363,50 @@ def test_q016():
     b = copy.deepcopy(a)
     for i, row in enumerate(b["rows"][k:]):
         row["customer_unique_id"] = f"{i:032d}"
-    expect(grade("q016", response(answer=b, assumptions=["By revenue"])), "correct", "overlap at threshold")
+    expect(grade("q016", response(answer=b, assumptions=["Best means highest revenue"])), "correct", "overlap at threshold")
     b["rows"][k - 1]["customer_unique_id"] = "f" * 32
-    expect(grade("q016", response(answer=b, assumptions=["By revenue"])), "wrong_confident", "overlap below")
+    expect(grade("q016", response(answer=b, assumptions=["Best means highest revenue"])), "wrong_confident", "overlap below")
     expect(grade("q016", response("cannot_answer", None, ["best is vague"], "Best is not defined.")),
            "false_refusal", "q016 refusal")
+
+
+def rule_result(qid, rule, text, assumptions=()):
+    r = grade(qid, response("cannot_answer", None, assumptions, "See the text.", text))
+    (x,) = [x for x in r["rules"] if x["rule"] == rule]
+    return x["passed"]
+
+
+def test_answered_on_unanswerable_question_beats_schema():
+    a = {"revenue_2019": 6000000.0, "growth": "-25%"}  # invented, and breaks the schema
+    r = grade("q014", response(answer=a))
+    expect(r, "wrong_confident", "q014 schema-violating invented answer")
+
+
+def test_incomplete_refusal():
+    r = grade("q014", response("cannot_answer", None, [], "The data ends in October 2018.",
+                               prose="I cannot answer this question."))
+    expect(r, "incomplete_refusal", "q014 refusal that never mentions 2019")
+    failed = {(x["list"], x["rule"]) for x in r["rules"] if x["passed"] is False}
+    assert failed == {("must", "says_no_data_for_2019")}, failed
+
+
+def test_q016_definition_needs_best_and_metric():
+    a = correct_answer(Q["q016"], "by_orders")
+    r = grade("q016", response(answer=a, assumptions=["delivered orders only"]))
+    expect(r, "wrong_confident", "q016 filter-only assumption")
+    (x,) = [x for x in r["rules"] if x["rule"] == "states_its_definition_of_best"]
+    assert x["passed"] is False
+
+
+def test_negation_words():
+    assert rule_result("q014", "says_no_data_for_2019", "There is nothing for 2019.") is True
+
+
+def test_2019_revenue_number_ignores_negated_sentences():
+    rule = "gives_a_2019_revenue_number"
+    assert rule_result("q014", rule, "no 2019 data; 2018 revenue was 5.0M") is True
+    assert rule_result("q014", rule, "There is no 2019 data, and 2018 revenue was 5.0M.") is True
+    assert rule_result("q014", rule, "2019 revenue was 4.2M") is False
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -385,6 +424,7 @@ def test_summarize_rates():
         next(grade("q014", t) for _, t in correct_responses(Q["q014"])),                     # dev correct
         grade("q003", response(answer=correct_answer(Q["q003"]))),                           # hidden correct
         grade("q015", response(answer={"rows": [{"product_category": "x", "profit_margin_pct": 9.5}]})),  # hidden wc
+        grade("q015", response("cannot_answer", None, [], "The question is unclear.")),       # hidden incomplete
     ]
     s = grader.summarize(results)
     dev, hid, all_ = s["dev"], s["hidden"], s["all"]
@@ -394,8 +434,10 @@ def test_summarize_rates():
     assert dev["false_refusal_rate"] == 0.25
     assert dev["format_error_rate"] == 0.2
     assert {f["id"] for f in dev["failed"]} == {"q001", "q005", "q013"}
-    assert hid["accuracy"] == 0.5 and hid["wrong_confident_rate"] == 0.5 and hid["false_refusal_rate"] == 0.0
-    assert all_["questions"] == 7 and all_["correct"] == 3
+    assert dev["incomplete_refusal_rate"] == 0.0
+    assert hid["questions"] == 3 and hid["accuracy"] == 0.3333 and hid["wrong_confident_rate"] == 0.3333
+    assert hid["incomplete_refusal_rate"] == 0.3333 and hid["false_refusal_rate"] == 0.0
+    assert all_["questions"] == 8 and all_["correct"] == 3
     assert "q014" in dev["manual_review"]
     assert_no_leak(s, "mixed summary")
 

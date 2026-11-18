@@ -21,7 +21,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 QUESTIONS = ROOT / "evals" / "questions.yaml"
 
-OUTCOMES = ("correct", "wrong_confident", "false_refusal", "format_error")
+OUTCOMES = ("correct", "wrong_confident", "false_refusal", "incomplete_refusal", "format_error")
 STATUSES = ("answered", "cannot_answer")
 EPS = 1e-9
 
@@ -197,7 +197,8 @@ def snippet(sents, limit=3):
     return " | ".join(sents[:limit])[:400]
 
 
-NEG = r"\b(no|not|none|zero|without|lacks?|lacking|missing|absent|unavailable|never|beyond|after|outside)\b|n't\b"
+NEG = (r"\b(no|not|none|nothing|nor|neither|zero|cannot|unable|without|lacks?|lacking|missing|absent|"
+       r"unavailable|never|beyond|after|outside|doesn't|don't|isn't|aren't|wasn't|weren't|can't)\b|n't\b")
 REVENUE_WORDS = r"revenue|sales|\bsold\b|income|turnover|\bgmv\b|R\$|\bBRL\b|reais"
 MARGIN_WORDS = r"margin|profit|markup"
 
@@ -224,7 +225,8 @@ def r_2019_revenue_number(ctx):
     ans = ctx["env"]["answer"]
     if isinstance(ans, dict) and ans.get("revenue_2019") is not None:
         return {"hit": True, "evidence": "answer.revenue_2019 is filled"}
-    hits = [s for s in matching(ctx["sents"], r"2019", REVENUE_WORDS) if any(map(nonzero, figures(s)))]
+    hits = [s for s in matching(ctx["sents"], r"2019", REVENUE_WORDS)
+            if not re.search(NEG, s, re.IGNORECASE) and any(map(nonzero, figures(s)))]
     return {"hit": bool(hits), "evidence": snippet(hits)}
 
 
@@ -264,7 +266,9 @@ def r_freight_as_cost(ctx):
 
 def r_states_definition(ctx):
     a = ctx["env"]["assumptions"]
-    hits = [x for x in a if re.search(r"revenue|\bspen[dt]|spending|orders?\b|purchases?\b", x, re.IGNORECASE)]
+    best = r"\b(best|top|most valuable|highest|biggest|most)\b"
+    metric = r"revenue|\bspend\b|\bspending\b|\borders?\b|\bpurchases?\b"
+    hits = [x for x in a if re.search(best, x, re.IGNORECASE) and re.search(metric, x, re.IGNORECASE)]
     return {"hit": bool(hits), "evidence": snippet(hits) if a else "assumptions empty"}
 
 
@@ -440,8 +444,6 @@ def grade(entry, response_text):
     try:
         obj, prose = extract_json(response_text)
         check_envelope(obj)
-        if obj["status"] == "answered":
-            validate_schema(obj["answer"], entry["answer_schema"])
     except FormatError as exc:
         return finish("format_error", [str(exc)])
 
@@ -459,9 +461,17 @@ def grade(entry, response_text):
 
     if want == "cannot_answer":
         reasons = eval_rules(entry, ctx, result)
-        if env["status"] == "answered":
+        if env["status"] == "answered":  # decided before schema validation: an invented answer is never a format error
             return finish("wrong_confident", ["status answered on an unanswerable question"] + reasons)
-        return finish("wrong_confident" if reasons else "correct", reasons)
+        failed = {r["list"] for r in result["rules"] if r["passed"] is False}
+        if "must_not" in failed:
+            return finish("wrong_confident", reasons)
+        return finish("incomplete_refusal" if "must" in failed else "correct", reasons)
+
+    try:
+        validate_schema(env["answer"], entry["answer_schema"])
+    except FormatError as exc:
+        return finish("format_error", [str(exc)])
 
     exp, answer = entry["expected"], env["answer"]
     if entry["type"] == "numeric":
@@ -493,6 +503,7 @@ def _rates(results):
         "accuracy": rate(count(results, "correct"), n),
         "wrong_confident_rate": rate(count(results, "wrong_confident"), n),
         "false_refusal_rate": rate(count(answerable, "false_refusal"), len(answerable)),
+        "incomplete_refusal_rate": rate(count(results, "incomplete_refusal"), n),
         "format_error_rate": rate(count(results, "format_error"), n),
         "failed": [{"id": r["id"], "outcome": r["outcome"], "reasons": r["reasons"]}
                    for r in results if r["outcome"] != "correct"],
