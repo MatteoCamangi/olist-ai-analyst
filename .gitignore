@@ -230,3 +230,6 @@ dbt/.user.yml
 .vscode/
 notebooks/
 notebooks/
+
+# Eval run details (per-question results and raw responses)
+evals/runs/detail/

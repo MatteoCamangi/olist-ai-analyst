@@ -13,6 +13,10 @@ evals/
   check_gold.py        reruns every gold query and compares it with questions.yaml
   grader.py            grades one agent response against questions.yaml (never inside the agent's sandbox)
   test_grader.py       tests for grader.py, with responses generated from questions.yaml
+  run_eval.py          runs the agent on a split, grades it and saves the run (never inside the agent's sandbox)
+  test_runner.py       tests for run_eval.py, with fake agents
+  runs/*.json          one summary per run: counts and rates only (committed, the score history)
+  runs/detail/         per-question results and raw responses (gitignored)
   cases/, results/     reserved for agent runs (empty for now)
 ```
 
@@ -94,3 +98,38 @@ under `manual_review` with the matching text, for a human to read.
 `summarize` reports, per split and overall: `accuracy` (correct only), `wrong_confident_rate`,
 `incomplete_refusal_rate` and `format_error_rate` over all questions of the split, `false_refusal_rate` over answerable questions only (q014 and q015 excluded), and the failed
 ids with their outcomes and reasons. The hidden split is the one that counts.
+
+## Running an eval
+
+```
+python evals/run_eval.py --split dev --label baseline --agent-cmd "python agent/main.py"
+python evals/run_eval.py --split dev --label quick --questions q001,q014 --agent-cmd "..."
+python evals/run_eval.py --split dev --label replay --responses-dir path/to/responses   # grades DIR/<id>.md
+python evals/run_eval.py --split hidden --label baseline --agent-cmd "..." --confirm-hidden
+python evals/test_runner.py                                                             # tests
+```
+
+For each question the runner starts `--agent-cmd` in a fresh process, writes one JSON object
+`{"question": ..., "answer_schema": ...}` to its stdin and reads the response text from stdout. Nothing else from
+`questions.yaml` is passed. A crash (non-zero exit), a timeout (`--timeout`, default 300 seconds) or empty output is
+graded `format_error` with reason `agent failed: ...`. `--questions` takes a subset of dev questions only.
+
+Each run writes `evals/runs/<UTC timestamp>_<split>_<label>.json` (timestamp, split, label, git sha and dirty flag,
+agent command, number of questions, counts and rates per split) and `evals/runs/detail/<same name>.json` (per-question
+results and raw responses). Commit the summaries; the detail folder is gitignored.
+
+**Hidden runs.** `--split hidden` and `--split all` are refused without `--confirm-hidden`. For these splits the
+console and the summary hold rates only: no question ids, outcomes or reasons, so failures cannot be tuned against.
+The summary records `earlier_hidden_runs`, the number of hidden or all runs already in `evals/runs/`: the more hidden
+runs, the less the hidden score is worth. Iterate on dev; run hidden rarely, at milestones. Do not open hidden detail
+files while working on the agent.
+
+**Denominators.** `accuracy`, `wrong_confident_rate`, `incomplete_refusal_rate` and `format_error_rate` are over all
+questions of the split; `false_refusal_rate` is over answerable questions only (7 of 8 per split: q014 and q015 are
+not answerable). With 8 questions per split, one question moves accuracy by 12.5 points: read small differences
+between runs as noise.
+
+**Heuristic rules.** The behavior and q016 rules are keyword and regex checks. They can miss a correct refusal worded
+in an unusual way (a false `incomplete_refusal`) or let through a figure written in words or split across sentences.
+Before trusting a behavior result, read the rule `evidence` and the `manual_review` snippets in the detail file
+(for hidden runs, only after the agent work it would inform is finished).
