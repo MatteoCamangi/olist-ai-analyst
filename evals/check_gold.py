@@ -64,7 +64,7 @@ def leaves(v):
 
 
 def check_schema(entry, errors):
-    """answer_schema must exist, match the expected field names, and never contain expected values."""
+    """answer_schema must exist, match the expected field names (and max_rows for rankings), and never contain expected values."""
     schema = entry.get("answer_schema")
     if not isinstance(schema, dict) or "answer" not in schema:
         errors.append("answer_schema missing or has no answer")
@@ -75,6 +75,9 @@ def check_schema(entry, errors):
     elif qtype == "ranking" and "interpretations" not in exp:
         want = {k for row in exp["rows"] for k in row}
         got = set(answer["rows"]["fields"])
+        if answer["rows"].get("max_rows") != len(exp["rows"]):
+            errors.append(f"answer_schema max_rows {answer['rows'].get('max_rows')!r} differs from "
+                          f"{len(exp['rows'])} expected rows")
     elif qtype == "set":
         want, got = set(exp["sets"]), set(answer)
     else:

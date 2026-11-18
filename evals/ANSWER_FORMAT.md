@@ -36,7 +36,6 @@ Use the field names exactly as written: no renaming, no extra nesting.
 | `rows:` with `order` and `fields` | `"rows": [ {...}, {...} ]`, a list of objects with exactly the listed fields, ranked so the first row is rank 1. |
 | `max_rows: N` | No more than N rows. |
 | `field: list of X (string)` | A JSON list of X values as strings. Order does not matter. |
-| `answer: null, or an object with the fields you consider relevant` | Field names are up to you. Use `null` when `status` is `cannot_answer`. |
 
 `status: answered | cannot_answer` appears in every schema: both values are always allowed.
 

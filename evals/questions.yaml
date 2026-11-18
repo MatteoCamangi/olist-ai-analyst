@@ -36,6 +36,7 @@
     status: answered | cannot_answer
     answer:
       rows:
+        max_rows: 10
         order: ranked, first row is rank 1
         fields:
           customer_unique_id: string
@@ -75,6 +76,7 @@
     status: answered | cannot_answer
     answer:
       rows:
+        max_rows: 10
         order: ranked, first row is rank 1
         fields:
           seller_id: string
@@ -1030,6 +1032,7 @@
     status: answered | cannot_answer
     answer:
       rows:
+        max_rows: 5
         order: ranked, first row is rank 1
         fields:
           customer_city: string
@@ -1095,6 +1098,7 @@
     status: answered | cannot_answer
     answer:
       rows:
+        max_rows: 5
         order: ranked, first row is rank 1
         fields:
           product_id: string
@@ -1147,6 +1151,7 @@
     status: answered | cannot_answer
     answer:
       rows:
+        max_rows: 1
         order: ranked, first row is rank 1
         fields:
           customer_state: string
@@ -1168,6 +1173,7 @@
     status: answered | cannot_answer
     answer:
       rows:
+        max_rows: 1
         order: ranked, first row is rank 1
         fields:
           customer_state: string
@@ -1190,6 +1196,7 @@
     status: answered | cannot_answer
     answer:
       rows:
+        max_rows: 1
         order: ranked, first row is rank 1
         fields:
           seller_id: string
@@ -1244,7 +1251,10 @@
   gold_sql: evals/gold/dev/q14.sql
   answer_schema:
     status: answered | cannot_answer
-    answer: null, or an object with the fields you consider relevant
+    answer:
+      revenue_2018: number
+      revenue_2019: number
+      change_pct: number
   expected:
     facts:
       orders_2019: 0
@@ -1267,7 +1277,12 @@
   gold_sql: evals/gold/hidden/q15.sql
   answer_schema:
     status: answered | cannot_answer
-    answer: null, or an object with the fields you consider relevant
+    answer:
+      rows:
+        order: ranked, first row is rank 1
+        fields:
+          product_category: string
+          profit_margin_pct: number
   expected:
     facts:
       cost_or_profit_columns: 0
