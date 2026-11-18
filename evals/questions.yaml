@@ -13,6 +13,12 @@
   question: How many orders did Olist receive in 2017 (by purchase date)? How many of them were delivered? What was the total
     revenue of the delivered ones?
   gold_sql: evals/gold/dev/q1.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      orders_cnt: integer
+      delivered_orders_cnt: integer
+      total_revenue: number
   expected:
     orders_cnt: 45101
     delivered_orders_cnt: 43428
@@ -26,6 +32,15 @@
   type: ranking
   question: Who are the top 10 customers by delivered revenue? (customer_unique_id)
   gold_sql: evals/gold/dev/q2.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      rows:
+        max_rows: 10
+        order: ranked, first row is rank 1
+        fields:
+          customer_unique_id: string
+          customer_revenue: number
   expected:
     key:
     - customer_unique_id
@@ -57,6 +72,15 @@
   type: ranking
   question: Who are the top 10 sellers by delivered revenue?
   gold_sql: evals/gold/hidden/q3.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      rows:
+        max_rows: 10
+        order: ranked, first row is rank 1
+        fields:
+          seller_id: string
+          seller_revenue: number
   expected:
     key:
     - seller_id
@@ -88,6 +112,11 @@
   type: set
   question: List the sellers at or above the 95th percentile of delivered revenue, and those at or below the 25th.
   gold_sql: evals/gold/hidden/q4.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      p95: list of seller_id (string)
+      p25: list of seller_id (string)
   expected:
     key:
     - seller_id
@@ -999,6 +1028,16 @@
   type: ranking
   question: Where do most orders come from? Show the top 5 customer cities (delivered orders only).
   gold_sql: evals/gold/dev/q5.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      rows:
+        max_rows: 5
+        order: ranked, first row is rank 1
+        fields:
+          customer_city: string
+          customer_state: string
+          orders_cnt: integer
   expected:
     key:
     - customer_city
@@ -1027,6 +1066,15 @@
   question: What is the repeat rate (customers with a second order / customers with at least one order)? And the 180-day repeat
     rate (second order within 180 days of the first)? (customer_unique_id)
   gold_sql: evals/gold/hidden/q6.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      customers: integer
+      repeat_customers: integer
+      repeat_rate_pct: number
+      eligible_180d: integer
+      repeat_180d: integer
+      repeat_rate_180d_pct: number
   expected:
     customers: 93358
     repeat_customers: 2015
@@ -1046,6 +1094,15 @@
   type: ranking
   question: What are the top 5 best-selling products by delivered revenue? (product_id)
   gold_sql: evals/gold/dev/q7.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      rows:
+        max_rows: 5
+        order: ranked, first row is rank 1
+        fields:
+          product_id: string
+          revenue: number
   expected:
     key:
     - product_id
@@ -1068,6 +1125,13 @@
   question: What is the average delivery time in days (purchase to customer delivery) and the count of late deliveries (delivered
     after the estimated date)? Delivered orders only.
   gold_sql: evals/gold/hidden/q8.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      delivery_days_avg: number
+      orders_delivered_cnt: integer
+      orders_delivered_late_cnt: integer
+      late_rate_pct: number
   expected:
     delivery_days_avg: 12.5
     orders_delivered_cnt: 96470
@@ -1083,6 +1147,15 @@
   type: ranking
   question: Which customer state has the highest average delivery time? (delivered orders only)
   gold_sql: evals/gold/hidden/q9.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      rows:
+        max_rows: 1
+        order: ranked, first row is rank 1
+        fields:
+          customer_state: string
+          delivery_days_avg: number
   expected:
     key:
     - customer_state
@@ -1096,6 +1169,15 @@
   type: ranking
   question: Which customer state has the highest late delivery rate? (delivered orders only)
   gold_sql: evals/gold/dev/q10.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      rows:
+        max_rows: 1
+        order: ranked, first row is rank 1
+        fields:
+          customer_state: string
+          late_rate_pct: number
   expected:
     key:
     - customer_state
@@ -1110,6 +1192,17 @@
   question: Which seller has the highest late delivery rate, among sellers with at least 10 delivered orders? (An order counts
     for a seller if it includes at least one of their items. Delivered orders only.)
   gold_sql: evals/gold/dev/q11.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      rows:
+        max_rows: 1
+        order: ranked, first row is rank 1
+        fields:
+          seller_id: string
+          delivered_orders: integer
+          late_orders: integer
+          late_rate_pct: number
   expected:
     key:
     - seller_id
@@ -1127,6 +1220,10 @@
   type: numeric
   question: How many orders were placed in the last 90 days?
   gold_sql: evals/gold/hidden/q12.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      orders_last_90d: integer
   expected:
     orders_last_90d: 19251
   tolerance:
@@ -1136,6 +1233,11 @@
   type: numeric
   question: How many orders were canceled, and what share of all orders is that?
   gold_sql: evals/gold/dev/q13.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      canceled_orders_cnt: integer
+      cancel_order_rate_pct: number
   expected:
     canceled_orders_cnt: 625
     cancel_order_rate_pct: 0.63
@@ -1147,6 +1249,12 @@
   type: behavior
   question: Why did revenue drop in 2019 compared to 2018?
   gold_sql: evals/gold/dev/q14.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      revenue_2018: number
+      revenue_2019: number
+      change_pct: number
   expected:
     facts:
       orders_2019: 0
@@ -1167,6 +1275,14 @@
   type: behavior
   question: What is the profit margin by product category?
   gold_sql: evals/gold/hidden/q15.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      rows:
+        order: ranked, first row is rank 1
+        fields:
+          product_category: string
+          profit_margin_pct: number
   expected:
     facts:
       cost_or_profit_columns: 0
@@ -1196,6 +1312,15 @@
   type: ranking
   question: Who are our best customers?
   gold_sql: evals/gold/hidden/q16.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      rows:
+        max_rows: 10
+        order: ranked, first row is rank 1
+        fields:
+          customer_unique_id: string
+          value: number
   expected:
     key:
     - customer_unique_id
