@@ -1299,9 +1299,7 @@
   gold_sql: evals/gold/hidden/q16.sql
   answer_schema:
     status: answered | cannot_answer
-    assumptions: must state the definition of "best" used for the ranking
     answer:
-      interpretation: string
       rows:
         max_rows: 10
         order: ranked, first row is rank 1
