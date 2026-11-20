@@ -147,8 +147,8 @@ def test_errors_returned_as_text():
 
 # -- loop with a fake client ------------------------------------------------------------------------------
 
-def usage(i=100, o=10, cr=0):
-    return SimpleNamespace(input_tokens=i, output_tokens=o, cache_read_input_tokens=cr, cache_creation_input_tokens=0)
+def usage(i=100, o=10, cr=0, cw=0):
+    return SimpleNamespace(input_tokens=i, output_tokens=o, cache_read_input_tokens=cr, cache_creation_input_tokens=cw)
 
 
 def text_block(t):
@@ -162,17 +162,37 @@ def tool_block(n, sql):
 ANSWER = 'There were 1 orders.\n\n```json\n{"status": "answered", "assumptions": [], "answer": {"n": 1}}\n```'
 
 
+class FakeStream:
+    """Stands in for the SDK's MessageStream: a context manager whose get_final_message() returns the response."""
+
+    def __init__(self, produce):
+        self.produce = produce
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get_final_message(self):
+        return self.produce()  # a script exception raises here, as a mid-stream error would
+
+
 class FakeClient:
+    """Streaming only: there is no create(), so a non-streaming call fails the test."""
+
     def __init__(self, script):
         self.script = script  # function(call_index, kwargs) -> response, or raises
         self.calls = []
         self.messages = self
 
-    def create(self, **kwargs):
+    def stream(self, **kwargs):
         self.calls.append({"tool_choice": kwargs["tool_choice"], "n_messages": len(kwargs["messages"]),
                            "last": kwargs["messages"][-1], "model": kwargs["model"], "system": kwargs["system"],
-                           "first": kwargs["messages"][0]})
-        return self.script(len(self.calls) - 1, kwargs)
+                           "first": kwargs["messages"][0], "max_tokens": kwargs["max_tokens"],
+                           "cache_control": kwargs.get("cache_control")})
+        i = len(self.calls) - 1
+        return FakeStream(lambda: self.script(i, kwargs))
 
 
 PAYLOAD = {"question": "How many orders?", "answer_schema": {"status": "answered | cannot_answer",
@@ -401,6 +421,84 @@ def test_cannot_answer_exits_zero():
         assert code == 0, err
         assert out.strip() == refusal
         assert read_trace(path)[-1] == {"event": "final", "text": refusal}
+
+
+# -- streaming and output limit ---------------------------------------------------------------------------
+
+def test_streamed_answer_returned_and_traced():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "trace.jsonl"
+        client = FakeClient(one_query_script)
+        code, out, err = run_main(client, env={analyst.KEY_ENV: SECRET, analyst.TRACE_ENV: str(path)})
+        assert code == 0, err
+        assert out.strip() == ANSWER
+        assert len(client.calls) == 2
+        assert all(c["max_tokens"] == analyst.MAX_TOKENS == 128000 for c in client.calls)
+        assert all(c["cache_control"] == {"type": "ephemeral"} for c in client.calls)
+        events = read_trace(path)
+        assert events[-1] == {"event": "final", "text": ANSWER}
+        assert [e["event"] for e in events] == ["text", "sql", "tool_result", "text", "final"]
+
+
+def test_max_tokens_stop():
+    def script(i, kw):
+        if i == 0:
+            return SimpleNamespace(stop_reason="tool_use", usage=usage(o=30),
+                                   content=[tool_block(1, "SELECT count(*) AS n FROM fct_orders")])
+        return SimpleNamespace(stop_reason="max_tokens", usage=usage(o=analyst.MAX_TOKENS),
+                               content=[text_block("A very long list that never")])
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "trace.jsonl"
+        code, out, err = run_main(FakeClient(script), env={analyst.KEY_ENV: SECRET, analyst.TRACE_ENV: str(path)})
+        assert code == 1 and out == ""
+        assert "output limit hit" in err and "max_tokens" in err, err
+        message = f"output limit hit: one model turn used all {analyst.MAX_TOKENS} max_tokens (stop_reason max_tokens)"
+        assert f"analyst: {message}" in err
+        events = read_trace(path)
+        assert events[-1] == {"event": "error", "message": message}, events[-1]
+        assert not any(e["event"] == "final" for e in events)
+        assert usage_line(err) == {"input_tokens": 200, "output_tokens": 30 + analyst.MAX_TOKENS, "tool_calls": 1}
+
+
+def test_usage_totals_with_streaming():
+    def script(i, kw):
+        if i == 0:
+            return SimpleNamespace(stop_reason="tool_use", usage=usage(i=7, o=40, cr=0, cw=5000),
+                                   content=[tool_block(1, "SELECT 1 AS n")])
+        if i == 1:
+            return SimpleNamespace(stop_reason="tool_use", usage=usage(i=12, o=55, cr=5000, cw=300),
+                                   content=[tool_block(2, "SELECT 2 AS n")])
+        return SimpleNamespace(stop_reason="end_turn", usage=usage(i=20, o=900, cr=5300, cw=0),
+                               content=[text_block(ANSWER)])
+    code, _, err = run_main(FakeClient(script))
+    assert code == 0, err
+    assert usage_line(err) == {"input_tokens": 7 + 5000 + 12 + 5000 + 300 + 20 + 5300,
+                               "output_tokens": 40 + 55 + 900, "tool_calls": 2}
+
+
+def test_midstream_overloaded_is_retried():
+    import anthropic
+    import httpx2
+
+    def script(i, kw):
+        if i == 0:  # an error event inside the stream: the HTTP status of the stream response is 200
+            raise anthropic.APIStatusError(
+                "overloaded", response=httpx2.Response(200, request=httpx2.Request("POST", "https://api.invalid")),
+                body={"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}})
+        return SimpleNamespace(stop_reason="end_turn", usage=usage(), content=[text_block(ANSWER)])
+    sleeps = []
+    client = FakeClient(script)
+    code, out, err = run_main(client, sleeps=sleeps)
+    assert code == 0, err
+    assert out.strip() == ANSWER and len(client.calls) == 2 and len(sleeps) == 1
+
+    def invalid(i, kw):  # a non-retryable error event is not retried
+        raise anthropic.APIStatusError(
+            "bad", response=httpx2.Response(200, request=httpx2.Request("POST", "https://api.invalid")),
+            body={"type": "error", "error": {"type": "invalid_request_error", "message": "bad"}})
+    client = FakeClient(invalid)
+    code, _, err = run_main(client)
+    assert code == 1 and len(client.calls) == 1 and "invalid_request_error" in err, err
 
 
 # -- prompt and isolation ---------------------------------------------------------------------------------

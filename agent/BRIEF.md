@@ -31,8 +31,8 @@
 - A filter on the right-hand table of a LEFT JOIN turns it into an inner join. Put the filter
   in the ON clause when that is not intended.
 - Rates over small groups are noisy: apply a minimum volume and state the threshold used.
-- Relative dates ("last 90 days"): use the as-of date given in the question. If there is none,
-  use the latest order date in the data and say so.
+- Relative dates ("last 90 days", "last month"): use the as-of date and window rules defined in
+  docs/metrics.md. Never use the current date.
 - Follow evals/ANSWER_FORMAT.md exactly. The JSON envelope is the last thing in the response.
 - Refuse (status cannot_answer) when the data cannot support the question: the period is not
   covered, or the column does not exist. The reason names what is missing and what the data

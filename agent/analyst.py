@@ -8,7 +8,11 @@ prose, then the JSON envelope of evals/ANSWER_FORMAT.md as the last ```json bloc
 to stderr:  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n}
 
 Exit codes: 0 answered (the envelope may still say cannot_answer), 1 failure (API error after retries, refusal,
-truncated or empty answer), 2 bad input or missing OLIST_AGENT_API_KEY.
+output limit hit (stop_reason max_tokens) or empty answer), 2 bad input or missing OLIST_AGENT_API_KEY.
+
+Every model turn is streamed (client.messages.stream) and read with get_final_message(): the SDK requires
+streaming for a max_tokens this large. Adaptive thinking (the model default, not set here) counts against the
+same max_tokens as the visible answer.
 
 The model sees only the system prompt built from ALLOWED_DOCS, the question with its answer_schema, and the results
 of its own run_sql calls (agent/sandbox.py).
@@ -38,7 +42,7 @@ import sandbox as sandbox_mod  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL = "claude-sonnet-5-5"
-MAX_TOKENS = 16000          # adaptive thinking plus a long ranked answer, still fine without streaming
+MAX_TOKENS = 128000         # the model maximum; thinking and answer share it; needs streaming
 MAX_TOOL_CALLS = 10
 MAX_TURNS = MAX_TOOL_CALLS + 5  # hard stop if the model keeps asking for tools after the budget
 MAX_RETRIES = 3
@@ -148,23 +152,37 @@ def build_user_message(payload):
 
 # -- API -------------------------------------------------------------------------------------------------
 
+RETRYABLE_STREAM_ERRORS = ("overloaded_error", "api_error")
+
+
+def _stream_error_type(exc):
+    """The error type of an error event sent inside a stream (the HTTP status is then 200), or None."""
+    body = getattr(exc, "body", None)
+    error = body.get("error") if isinstance(body, dict) else None
+    return error.get("type") if isinstance(error, dict) else None
+
+
 def _retryable(exc):
     import anthropic
     if isinstance(exc, (anthropic.RateLimitError, anthropic.APIConnectionError)):
         return True
-    return isinstance(exc, anthropic.APIStatusError) and exc.status_code >= 500
+    if not isinstance(exc, anthropic.APIStatusError):
+        return False
+    return exc.status_code >= 500 or _stream_error_type(exc) in RETRYABLE_STREAM_ERRORS
 
 
 def _describe(exc):
     status = getattr(exc, "status_code", None)
-    return type(exc).__name__ + (f" (status {status})" if status else "")
+    kind = _stream_error_type(exc)
+    return type(exc).__name__ + (f" (status {status})" if status else "") + (f" ({kind})" if kind else "")
 
 
 def call_with_retry(client, sleep, **kwargs):
     import anthropic
     for attempt in range(MAX_RETRIES + 1):
         try:
-            return client.messages.create(**kwargs)
+            with client.messages.stream(**kwargs) as stream:
+                return stream.get_final_message()
         except anthropic.APIError as exc:
             if not _retryable(exc):
                 raise AgentError(f"API error: {_describe(exc)}") from None
@@ -232,6 +250,9 @@ def run(payload, client, sandbox, usage, sleep=time.sleep, system=None, trace=No
             return text
         if response.stop_reason == "refusal":
             raise AgentError("the model refused (stop_reason refusal)")
+        if response.stop_reason == "max_tokens":
+            raise AgentError(f"output limit hit: one model turn used all {MAX_TOKENS} max_tokens "
+                             "(stop_reason max_tokens)")
         raise AgentError(f"unexpected stop_reason {response.stop_reason}")
     raise AgentError(f"no final answer after {MAX_TURNS} turns")
 

@@ -120,6 +120,9 @@ results and raw responses). Commit the summaries; the detail folder is gitignore
 
 **Hidden runs.** `--split hidden` and `--split all` are refused without `--confirm-hidden`. For these splits the
 console and the summary hold rates only: no question ids, outcomes or reasons, so failures cannot be tuned against.
+The one exception is the reason text of `format_error` entries (infrastructure failures such as output limits or
+timeouts, which never contain expected values), read without question ids. Any change made after such a look is
+recorded in the run label.
 The summary records `earlier_hidden_runs`, the number of hidden or all runs already in `evals/runs/`: the more hidden
 runs, the less the hidden score is worth. Iterate on dev; run hidden rarely, at milestones. Do not open hidden detail
 files while working on the agent.
