@@ -1,0 +1,38 @@
+{
+  "timestamp": "20261120T175219Z",
+  "split": "dev",
+  "label": "v2-maxtokens",
+  "git_sha": "ac061edabfb162f8b9598b620815d86be8b5e1f1",
+  "git_dirty": false,
+  "agent_cmd": "python agent/analyst.py",
+  "responses_dir": null,
+  "timeout": 900.0,
+  "n_questions": 8,
+  "rates": {
+    "dev": {
+      "questions": 8,
+      "answerable": 7,
+      "correct": 8,
+      "accuracy": 1.0,
+      "wrong_confident_rate": 0.0,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.0
+    },
+    "all": {
+      "questions": 8,
+      "answerable": 7,
+      "correct": 8,
+      "accuracy": 1.0,
+      "wrong_confident_rate": 0.0,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.0
+    }
+  },
+  "usage": {
+    "input_tokens": 282489,
+    "output_tokens": 5799,
+    "tool_calls": 9
+  }
+}

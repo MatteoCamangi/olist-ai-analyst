@@ -1,0 +1,39 @@
+{
+  "timestamp": "20261120T173804Z",
+  "split": "hidden",
+  "label": "baseline-v1",
+  "git_sha": "9911d63e361abc0b0cb99ce16b294964a0c65654",
+  "git_dirty": true,
+  "agent_cmd": "python agent/analyst.py",
+  "responses_dir": null,
+  "timeout": 300,
+  "n_questions": 8,
+  "rates": {
+    "hidden": {
+      "questions": 8,
+      "answerable": 7,
+      "correct": 7,
+      "accuracy": 0.875,
+      "wrong_confident_rate": 0.0,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.125
+    },
+    "all": {
+      "questions": 8,
+      "answerable": 7,
+      "correct": 7,
+      "accuracy": 0.875,
+      "wrong_confident_rate": 0.0,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.125
+    }
+  },
+  "usage": {
+    "input_tokens": 366187,
+    "output_tokens": 23856,
+    "tool_calls": 16
+  },
+  "earlier_hidden_runs": 0
+}
