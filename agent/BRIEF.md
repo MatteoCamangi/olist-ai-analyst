@@ -11,10 +11,11 @@
 
 ## 2. What it knows
 - docs/metrics.md (metric definitions) and the dbt model docs for the marts.
-- Queries the marts layer only: fct_orders, fct_order_items, fct_order_sellers, plus any dim_*
-  models in models/marts (check with `ls models/marts` and list them here).
+- Queries the marts layer only: fct_orders, fct_order_items, fct_order_sellers, dim_customers and
+  dim_products.
 - May read information_schema to check which tables and columns exist.
-- Cannot see anything under evals/, the raw tables, or the SQL of the dbt models.
+- Cannot see anything under evals/ (except evals/ANSWER_FORMAT.md, loaded by the agent's code from its
+  allowed list), the raw tables, or the SQL of the dbt models.
 
 ## 3. What it can do
 - One tool for v1: run_sql, read-only, on warehouse.duckdb. No web, no Python, no file writes.
@@ -43,6 +44,6 @@
 ## 5. Open decisions (settled)
 - Sandbox: the agent's only tool is read-only run_sql with external file access disabled.
   Docs are loaded from a fixed allowed list by the agent's own code. The agent code lives
-  outside evals/ and never reads it.
+  outside evals/ and never reads it, except evals/ANSWER_FORMAT.md, which it loads from the allowed list.
 - Key: OLIST_AGENT_API_KEY stored as a Codespaces secret. Model: claude-sonnet-5-5.
   $5 credit, auto-reload off.

@@ -25,6 +25,7 @@ import json, sys
 from pathlib import Path
 q = json.loads(sys.stdin.read())
 print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
+print('USAGE {"input_tokens": 1000, "output_tokens": 200, "tool_calls": 3}', file=sys.stderr)
 """,
     "refuser": """
 import json, sys
@@ -36,7 +37,17 @@ print("I cannot answer this from the data.\\n\\n```json\\n" + json.dumps(
     "crasher": """
 import sys
 sys.stdin.read()
+print('USAGE {"input_tokens": 50, "output_tokens": 5, "tool_calls": 1}', file=sys.stderr)
 sys.exit(1)
+""",
+    "noisy": """
+import sys
+sys.stdin.read()
+print("partial", file=sys.stderr)
+print('USAGE {"input_tokens": 1, "output_tokens": 1, "tool_calls": 1}', file=sys.stderr)
+print('USAGE not json', file=sys.stderr)
+print('USAGE {"input_tokens": 7, "output_tokens": 2, "tool_calls": 4}', file=sys.stderr)
+print("no json here")
 """,
     "sleeper": """
 import sys, time
@@ -213,6 +224,54 @@ def test_responses_dir(env):
     (q,) = [q for q in detail["questions"] if q["id"] == "q001"]
     assert q["result"]["outcome"] == "format_error"
     assert q["result"]["reasons"] == ["agent failed: no response file"]
+
+
+@with_env
+def test_usage_totals(env):
+    n_dev = sum(e["split"] == "dev" for e in Q.values())
+    p = env.run("--split", "dev", "--label", "usage", agent="perfect")
+    ok(p, "perfect")
+    summary, detail = env.latest(p)
+    assert summary["usage"] == {"input_tokens": 1000 * n_dev, "output_tokens": 200 * n_dev,
+                                "tool_calls": 3 * n_dev}, summary["usage"]
+    assert "usage: input_tokens" in p.stdout
+    assert all("usage" not in q for q in detail["questions"]), "per-question usage in detail"
+
+    p = env.run("--split", "dev", "--label", "crash", agent="crasher")  # failed calls still count
+    ok(p, "crash")
+    summary, _ = env.latest(p)
+    assert summary["usage"] == {"input_tokens": 50 * n_dev, "output_tokens": 5 * n_dev, "tool_calls": n_dev}
+
+    p = env.run("--split", "dev", "--label", "noisy", "--questions", "q001", agent="noisy")  # last valid line wins
+    ok(p, "noisy")
+    summary, _ = env.latest(p)
+    assert summary["usage"] == {"input_tokens": 7, "output_tokens": 2, "tool_calls": 4}, summary["usage"]
+
+    p = env.run("--split", "dev", "--label", "nousage", agent="refuser")  # no USAGE line: zeros
+    ok(p, "refuser")
+    summary, _ = env.latest(p)
+    assert summary["usage"] == {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0}
+
+
+@with_env
+def test_usage_is_totals_only(env):
+    p = env.run("--split", "all", "--label", "usage-all", "--confirm-hidden", agent="perfect")
+    ok(p, "all")
+    summary, _ = env.latest(p)
+    assert set(summary["usage"]) == {"input_tokens", "output_tokens", "tool_calls"}
+    assert all(type(v) is int for v in summary["usage"].values())
+    assert not ID.search(json.dumps(summary)), "summary holds question ids"
+    assert not ID.search(p.stdout), "console holds question ids"
+
+
+@with_env
+def test_usage_null_for_responses_dir(env):
+    rdir = env.dir / "responses"
+    rdir.mkdir()
+    p = env.run("--split", "dev", "--label", "files", "--responses-dir", str(rdir))
+    ok(p, "responses-dir")
+    summary, _ = env.latest(p)
+    assert summary["usage"] is None and "usage:" not in p.stdout
 
 
 def test_hidden_values_list_is_not_empty():

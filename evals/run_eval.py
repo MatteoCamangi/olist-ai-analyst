@@ -1,7 +1,7 @@
 """Run the analyst agent on every question of a split, grade the responses and save the run.
 
 Usage (from the repo root):
-    python evals/run_eval.py --split dev --label baseline --agent-cmd "python agent/main.py"
+    python evals/run_eval.py --split dev --label baseline --agent-cmd "python agent/analyst.py"
     python evals/run_eval.py --split dev --label replay --responses-dir path/to/responses
     python evals/run_eval.py --split hidden --label baseline --agent-cmd "..." --confirm-hidden
 
@@ -11,9 +11,12 @@ object on stdin and writes its full response text to stdout. Nothing else from q
 This runner reads the hidden entries. Like grader.py it runs outside the agent's sandbox.
 
 Outputs:
-    evals/runs/<UTC timestamp>_<split>_<label>.json         summary: counts and rates only (committed)
+    evals/runs/<UTC timestamp>_<split>_<label>.json         summary: counts, rates and usage totals only (committed)
     evals/runs/detail/<UTC timestamp>_<split>_<label>.json  per-question results and responses (gitignored)
 Console: per-question lines for dev only. Hidden and all print rates only.
+
+Usage: the agent may write one stderr line  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n}.
+The summary keeps the totals over all questions (failed calls included), never per-question figures.
 """
 import argparse
 import datetime as dt
@@ -32,6 +35,8 @@ import grader  # noqa: E402
 ROOT = grader.ROOT
 RUNS = ROOT / "evals" / "runs"
 PAYLOAD_FIELDS = ("question", "answer_schema")  # the only entry fields the agent ever sees
+USAGE_KEYS = ("input_tokens", "output_tokens", "tool_calls")
+USAGE_LINE = re.compile(r"^USAGE (\{.*\})\s*$", re.MULTILINE)
 RATE_KEYS = ("questions", "answerable", "correct", "accuracy", "wrong_confident_rate", "false_refusal_rate",
              "incomplete_refusal_rate", "format_error_rate")
 
@@ -64,6 +69,26 @@ def call_agent(cmd, entry, timeout):
     return out, err
 
 
+def parse_usage(stderr):
+    """The last USAGE line of the agent's stderr as a dict of the three counts, or None."""
+    for raw in reversed(USAGE_LINE.findall(stderr or "")):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and all(type(data.get(k)) is int and data[k] >= 0 for k in USAGE_KEYS):
+            return {k: data[k] for k in USAGE_KEYS}
+    return None
+
+
+def usage_totals(items):
+    totals = dict.fromkeys(USAGE_KEYS, 0)
+    for item in items:
+        for k, v in (item.get("usage") or {}).items():
+            totals[k] += v
+    return totals
+
+
 def read_response(directory, entry):
     path = Path(directory) / f"{entry['id']}.md"
     if not path.is_file():
@@ -94,7 +119,7 @@ def run_one(args, entry):
         if len(exc.args) > 1:
             stderr = exc.args[1] or ""
     return {"result": result, "response": response, "stderr_tail": (stderr or "")[-2000:],
-            "seconds": round(time.monotonic() - start, 2)}
+            "seconds": round(time.monotonic() - start, 2), "usage": parse_usage(stderr)}
 
 
 def git_info():
@@ -189,11 +214,13 @@ def main(argv=None):
     summary = {"timestamp": stamp, "split": args.split, "label": args.label, "git_sha": sha, "git_dirty": dirty,
                "agent_cmd": args.agent_cmd,
                "responses_dir": str(args.responses_dir) if args.responses_dir else None,
-               "timeout": args.timeout, "n_questions": len(entries), "rates": rates_only(full)}
+               "timeout": args.timeout, "n_questions": len(entries), "rates": rates_only(full),
+               "usage": None if args.responses_dir else usage_totals(items)}
     if args.split != "dev":
         summary["earlier_hidden_runs"] = earlier_hidden_runs(runs_dir)
     detail = {**summary, "summary": full,
-              "questions": [{"id": i["result"]["id"], **i} for i in items]}
+              "questions": [{"id": i["result"]["id"], **{k: v for k, v in i.items() if k != "usage"}}
+                            for i in items]}
 
     (runs_dir / "detail").mkdir(parents=True, exist_ok=True)
     summary_path, detail_path = runs_dir / f"{name}.json", runs_dir / "detail" / f"{name}.json"
@@ -203,6 +230,10 @@ def main(argv=None):
     if show_ids:
         print()
     print_rates(summary["rates"])
+    if summary["usage"] is not None:
+        u = summary["usage"]
+        print(f"usage: input_tokens {u['input_tokens']}  output_tokens {u['output_tokens']}  "
+              f"tool_calls {u['tool_calls']}")
     if show_ids:
         manual = full["all"]["manual_review"]
         print(f"manual_review: {', '.join(manual) if manual else 'none'}")
