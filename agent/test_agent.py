@@ -6,6 +6,7 @@ Needs warehouse.duckdb with no writer holding the lock.
 import io
 import json
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 from types import SimpleNamespace
@@ -302,6 +303,104 @@ def test_key_never_printed():
                    lambda i, kw: (_ for _ in ()).throw(RuntimeError(secret))):
         _, out, err = run_main(FakeClient(script))
         assert secret not in out + err
+
+
+# -- trace ------------------------------------------------------------------------------------------------
+
+SECRET = "sk-test-secret-123"
+
+
+def one_query_script(i, kw):
+    if i == 0:
+        return SimpleNamespace(stop_reason="tool_use", usage=usage(),
+                               content=[text_block("Counting."), tool_block(1, "SELECT count(*) AS n FROM fct_orders")])
+    return SimpleNamespace(stop_reason="end_turn", usage=usage(), content=[text_block(ANSWER)])
+
+
+def read_trace(path):
+    return [json.loads(line) for line in Path(path).read_text().splitlines()]
+
+
+def test_trace_written_when_env_set():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "trace.jsonl"
+        client = FakeClient(one_query_script)
+        code, out, err = run_main(client, env={analyst.KEY_ENV: SECRET, analyst.TRACE_ENV: str(path)})
+        assert code == 0, err
+        events = read_trace(path)
+        assert [e["event"] for e in events] == ["text", "sql", "tool_result", "text", "final"], events
+        assert events[0] == {"event": "text", "turn": 1, "text": "Counting."}
+        assert events[1] == {"event": "sql", "turn": 1, "tool_use_id": "tu_1",
+                             "sql": "SELECT count(*) AS n FROM fct_orders"}
+        sent = client.calls[1]["last"]["content"][0]  # the tool result exactly as the model received it
+        assert events[2] == {"event": "tool_result", "tool_use_id": "tu_1", "content": sent["content"],
+                             "is_error": sent["is_error"]}
+        assert events[2]["content"].startswith("n\n99441")
+        assert events[4] == {"event": "final", "text": out.strip()}
+
+
+def test_trace_records_sql_errors_and_budget():
+    def script(i, kw):
+        if kw["tool_choice"] == {"type": "none"}:
+            return SimpleNamespace(stop_reason="end_turn", usage=usage(), content=[text_block(ANSWER)])
+        return SimpleNamespace(stop_reason="tool_use", usage=usage(),
+                               content=[tool_block(f"{i}_{k}", "SELECT * FROM nope") for k in range(3)])
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "trace.jsonl"
+        code, _, err = run_main(FakeClient(script), env={analyst.KEY_ENV: SECRET, analyst.TRACE_ENV: str(path)})
+        assert code == 0, err
+        events = read_trace(path)
+        results = [e for e in events if e["event"] == "tool_result"]
+        assert len(results) == 12 and all(r["is_error"] for r in results)
+        assert results[0]["content"].startswith("ERROR: unknown table")
+        assert [r["content"] == analyst.OVER_BUDGET_RESULT for r in results[-3:]] == [False, True, True]
+        assert sum(e["event"] == "sql" for e in events) == 12
+        assert [e["event"] for e in events[-3:]] == ["budget_message", "text", "final"]
+
+
+def test_no_trace_without_env():
+    with tempfile.TemporaryDirectory() as tmp:
+        code, _, err = run_main(FakeClient(one_query_script))
+        assert code == 0, err
+        code, _, err = run_main(FakeClient(one_query_script), env={analyst.KEY_ENV: SECRET, analyst.TRACE_ENV: ""})
+        assert code == 0, err
+        assert list(Path(tmp).iterdir()) == []
+
+
+def test_trace_file_unopenable_exits_2():
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = Path(tmp) / "missing_dir" / "trace.jsonl"
+        code, out, err = run_main(FakeClient(None), env={analyst.KEY_ENV: SECRET, analyst.TRACE_ENV: str(bad)})
+        assert code == 2 and out == "" and "cannot open trace file" in err and str(bad) not in err
+
+
+def test_key_never_in_trace():
+    scripts = (one_query_script,
+               lambda i, kw: SimpleNamespace(stop_reason="refusal", usage=usage(), content=[text_block("no")]),
+               lambda i, kw: (_ for _ in ()).throw(RuntimeError(SECRET)))
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "trace.jsonl"
+        for script in scripts:
+            run_main(FakeClient(script), env={analyst.KEY_ENV: SECRET, analyst.TRACE_ENV: str(path)})
+        text = path.read_text()
+        assert SECRET not in text
+        events = read_trace(path)
+        errors = [e["message"] for e in events if e["event"] == "error"]
+        assert errors == ["the model refused (stop_reason refusal)", "failed: RuntimeError"], errors
+
+
+def test_cannot_answer_exits_zero():
+    refusal = ('The data has no cost column, so margin cannot be computed.\n\n```json\n'
+               '{"status": "cannot_answer", "assumptions": [], "answer": null, '
+               '"reason": "No cost data in the marts."}\n```')
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "trace.jsonl"
+        client = FakeClient(lambda i, kw: SimpleNamespace(stop_reason="end_turn", usage=usage(),
+                                                          content=[text_block(refusal)]))
+        code, out, err = run_main(client, env={analyst.KEY_ENV: SECRET, analyst.TRACE_ENV: str(path)})
+        assert code == 0, err
+        assert out.strip() == refusal
+        assert read_trace(path)[-1] == {"event": "final", "text": refusal}
 
 
 # -- prompt and isolation ---------------------------------------------------------------------------------

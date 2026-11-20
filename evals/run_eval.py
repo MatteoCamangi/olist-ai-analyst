@@ -12,8 +12,12 @@ This runner reads the hidden entries. Like grader.py it runs outside the agent's
 
 Outputs:
     evals/runs/<UTC timestamp>_<split>_<label>.json         summary: counts, rates and usage totals only (committed)
-    evals/runs/detail/<UTC timestamp>_<split>_<label>.json  per-question results and responses (gitignored)
+    evals/runs/detail/<UTC timestamp>_<split>_<label>.json  per-question results, responses and traces (gitignored)
 Console: per-question lines for dev only. Hidden and all print rates only.
+
+Trace: each agent call gets its own temp file in AGENT_TRACE_FILE. The JSON lines the agent appends there are
+stored as "trace" in the detail file only (null with --responses-dir), never in the summary or on the console.
+Inspect one dev question with  python evals/show_detail.py <detail file> <id>.
 
 Usage: the agent may write one stderr line  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n}.
 The summary keeps the totals over all questions (failed calls included), never per-question figures.
@@ -26,6 +30,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -35,6 +40,7 @@ import grader  # noqa: E402
 ROOT = grader.ROOT
 RUNS = ROOT / "evals" / "runs"
 PAYLOAD_FIELDS = ("question", "answer_schema")  # the only entry fields the agent ever sees
+TRACE_ENV = "AGENT_TRACE_FILE"
 USAGE_KEYS = ("input_tokens", "output_tokens", "tool_calls")
 USAGE_LINE = re.compile(r"^USAGE (\{.*\})\s*$", re.MULTILINE)
 RATE_KEYS = ("questions", "answerable", "correct", "accuracy", "wrong_confident_rate", "false_refusal_rate",
@@ -49,24 +55,46 @@ def payload(entry):
     return json.dumps({k: entry[k] for k in PAYLOAD_FIELDS})
 
 
+def read_trace(path):
+    """The JSON lines of a trace file as a list; a line that is not a JSON object is kept as unparsed."""
+    try:
+        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except FileNotFoundError:
+        return []
+    events = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            event = None
+        events.append(event if isinstance(event, dict) else {"event": "unparsed", "raw": line})
+    return events
+
+
 def call_agent(cmd, entry, timeout):
-    """Return (stdout, stderr). Raises AgentFailed on a crash, timeout or empty output."""
-    try:
-        proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, start_new_session=True)
-    except OSError as exc:
-        raise AgentFailed(f"agent failed: {exc}")
-    try:
-        out, err = proc.communicate(payload(entry), timeout=timeout)
-    except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)  # the whole session: shell and its children
-        proc.communicate()
-        raise AgentFailed(f"agent failed: timeout after {timeout}s")
+    """Return (stdout, stderr, trace). Raises AgentFailed(reason, stderr, trace) on a crash, timeout or empty output."""
+    with tempfile.TemporaryDirectory(prefix="agent_trace_") as tmp:
+        trace_path = Path(tmp) / "trace.jsonl"
+        try:
+            proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True, start_new_session=True,
+                                    env={**os.environ, TRACE_ENV: str(trace_path)})
+        except OSError as exc:
+            raise AgentFailed(f"agent failed: {exc}", "", [])
+        try:
+            out, err = proc.communicate(payload(entry), timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)  # the whole session: shell and its children
+            proc.communicate()
+            raise AgentFailed(f"agent failed: timeout after {timeout}s", "", read_trace(trace_path))
+        trace = read_trace(trace_path)
     if proc.returncode != 0:
-        raise AgentFailed(f"agent failed: exit code {proc.returncode}", err)
+        raise AgentFailed(f"agent failed: exit code {proc.returncode}", err, trace)
     if not out.strip():
-        raise AgentFailed("agent failed: empty output", err)
-    return out, err
+        raise AgentFailed("agent failed: empty output", err, trace)
+    return out, err, trace
 
 
 def parse_usage(stderr):
@@ -107,18 +135,20 @@ def failed_result(entry, reason):
 
 def run_one(args, entry):
     start = time.monotonic()
-    response, stderr = None, ""
+    response, stderr, trace = None, "", None
     try:
         if args.responses_dir:
             response, stderr = read_response(args.responses_dir, entry)
         else:
-            response, stderr = call_agent(args.agent_cmd, entry, args.timeout)
+            response, stderr, trace = call_agent(args.agent_cmd, entry, args.timeout)
         result = grader.grade(entry, response)
     except AgentFailed as exc:
         result = failed_result(entry, exc.args[0])
         if len(exc.args) > 1:
             stderr = exc.args[1] or ""
-    return {"result": result, "response": response, "stderr_tail": (stderr or "")[-2000:],
+        if len(exc.args) > 2:
+            trace = exc.args[2]
+    return {"result": result, "response": response, "trace": trace, "stderr_tail": (stderr or "")[-2000:],
             "seconds": round(time.monotonic() - start, 2), "usage": parse_usage(stderr)}
 
 

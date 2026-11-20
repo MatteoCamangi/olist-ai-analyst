@@ -12,6 +12,16 @@ truncated or empty answer), 2 bad input or missing OLIST_AGENT_API_KEY.
 
 The model sees only the system prompt built from ALLOWED_DOCS, the question with its answer_schema, and the results
 of its own run_sql calls (agent/sandbox.py).
+
+Trace: if AGENT_TRACE_FILE is set, one JSON line per event is appended to that file (flushed per line):
+    {"event": "text", "turn": n, "text"}                   each non-empty text block the model returns
+    {"event": "sql", "turn": n, "tool_use_id", "sql"}      each run_sql call, over-budget ones included
+    {"event": "tool_result", "tool_use_id", "content", "is_error"}   exactly what goes back to the model
+    {"event": "budget_message", "text"}                    when the query budget runs out
+    {"event": "final", "text"}                             the response printed on stdout
+    {"event": "error", "message"}                          the failure printed on stderr
+Only these fields are written: never the API key, request headers, the system prompt or raw API objects.
+Without the variable no file is written. A trace file that cannot be opened exits 2.
 """
 import json
 import os
@@ -35,6 +45,7 @@ MAX_RETRIES = 3
 BACKOFF_SECONDS = 2.0
 API_TIMEOUT_SECONDS = 240
 KEY_ENV = "OLIST_AGENT_API_KEY"
+TRACE_ENV = "AGENT_TRACE_FILE"
 
 # Every file the agent's prompt is built from. Nothing else is ever read for the model.
 BRIEF = "agent/BRIEF.md"
@@ -57,6 +68,28 @@ _DOC_REF = re.compile(r"{{\s*doc\(\s*['\"](\w+)['\"]\s*\)\s*}}")
 
 class AgentError(Exception):
     """A failure that ends the run with exit code 1. The message never holds the API key or response bodies."""
+
+
+class Trace:
+    """Appends one JSON line per event to a file. Callers pass only the documented fields."""
+
+    def __init__(self, path):
+        self._f = open(path, "a", encoding="utf-8")
+
+    def event(self, kind, **fields):
+        self._f.write(json.dumps({"event": kind, **fields}, ensure_ascii=False) + "\n")
+        self._f.flush()
+
+    def close(self):
+        self._f.close()
+
+
+class NoTrace:
+    def event(self, kind, **fields):
+        pass
+
+    def close(self):
+        pass
 
 
 # -- prompt ----------------------------------------------------------------------------------------------
@@ -150,34 +183,43 @@ def _add_usage(usage, u):
     usage["output_tokens"] += getattr(u, "output_tokens", 0) or 0
 
 
-def run(payload, client, sandbox, usage, sleep=time.sleep, system=None):
+def run(payload, client, sandbox, usage, sleep=time.sleep, system=None, trace=None):
     """Return the final response text. Updates usage in place, so it is complete even when this raises."""
+    trace = trace or NoTrace()
     system = system if system is not None else build_system_prompt()
     messages = [{"role": "user", "content": build_user_message(payload)}]
     tool_choice = {"type": "auto"}
-    for _ in range(MAX_TURNS):
+    for turn in range(1, MAX_TURNS + 1):
         response = call_with_retry(
             client, sleep, model=MODEL, max_tokens=MAX_TOKENS, system=system, messages=messages,
             tools=[sandbox_mod.TOOL], tool_choice=tool_choice, cache_control={"type": "ephemeral"})
         _add_usage(usage, response.usage)
         messages.append({"role": "assistant", "content": response.content})
+        for block in response.content:
+            if block.type == "text" and block.text.strip():
+                trace.event("text", turn=turn, text=block.text)
 
         if response.stop_reason == "tool_use":
             results = []
             for block in response.content:
                 if block.type != "tool_use":
                     continue
+                sql = block.input.get("sql", "") if isinstance(block.input, dict) else ""
+                trace.event("sql", turn=turn, tool_use_id=block.id, sql=sql)
                 if usage["tool_calls"] < MAX_TOOL_CALLS:
                     usage["tool_calls"] += 1
-                    sql = block.input.get("sql", "") if isinstance(block.input, dict) else ""
                     out = sandbox.run_sql(sql)
-                    results.append({"type": "tool_result", "tool_use_id": block.id, "content": out,
-                                    "is_error": out.startswith("ERROR")})
+                    result = {"type": "tool_result", "tool_use_id": block.id, "content": out,
+                              "is_error": out.startswith("ERROR")}
                 else:
-                    results.append({"type": "tool_result", "tool_use_id": block.id, "content": OVER_BUDGET_RESULT,
-                                    "is_error": True})
+                    result = {"type": "tool_result", "tool_use_id": block.id, "content": OVER_BUDGET_RESULT,
+                              "is_error": True}
+                results.append(result)
+                trace.event("tool_result", tool_use_id=block.id, content=result["content"],
+                            is_error=result["is_error"])
             if usage["tool_calls"] >= MAX_TOOL_CALLS:
                 results.append({"type": "text", "text": BUDGET_MESSAGE})
+                trace.event("budget_message", text=BUDGET_MESSAGE)
                 tool_choice = {"type": "none"}
             messages.append({"role": "user", "content": results})
             continue
@@ -186,6 +228,7 @@ def run(payload, client, sandbox, usage, sleep=time.sleep, system=None):
             text = "\n\n".join(b.text for b in response.content if b.type == "text" and b.text.strip()).strip()
             if not text:
                 raise AgentError("the model returned no text")
+            trace.event("final", text=text)
             return text
         if response.stop_reason == "refusal":
             raise AgentError("the model refused (stop_reason refusal)")
@@ -205,7 +248,7 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
     stdin, stdout, stderr = stdin or sys.stdin, stdout or sys.stdout, stderr or sys.stderr
     env = os.environ if env is None else env
     usage = {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0}
-    sandbox = None
+    sandbox, trace = None, NoTrace()
     try:
         try:
             payload = json.loads(stdin.read())
@@ -218,22 +261,31 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
         if not api_key:
             print(f"analyst: {KEY_ENV} is not set", file=stderr)
             return 2
+        if env.get(TRACE_ENV):
+            try:
+                trace = Trace(env[TRACE_ENV])
+            except OSError as exc:
+                print(f"analyst: cannot open trace file ({type(exc).__name__})", file=stderr)
+                return 2
         try:
             client = (client_factory or _default_client)(api_key)
             sandbox = (sandbox_factory or sandbox_mod.Sandbox)()
-            text = run(payload, client, sandbox, usage, sleep=sleep)
+            text = run(payload, client, sandbox, usage, sleep=sleep, trace=trace)
         except AgentError as exc:
             print(f"analyst: {exc}", file=stderr)
+            trace.event("error", message=str(exc))
             return 1
         except Exception as exc:  # only database errors (e.g. a lock) show their text; others could echo request data
             detail = f": {sandbox_mod._one_line(exc)}" if isinstance(exc, sandbox_mod.duckdb.Error) else ""
             print(f"analyst: failed: {type(exc).__name__}{detail}", file=stderr)
+            trace.event("error", message=f"failed: {type(exc).__name__}{detail}")
             return 1
         print(text, file=stdout)
         return 0
     finally:
         if sandbox is not None:
             sandbox.close()
+        trace.close()
         print("USAGE " + json.dumps(usage), file=stderr)
         stderr.flush()
 

@@ -17,6 +17,8 @@ import test_grader  # noqa: E402
 from test_grader import Q, assert_no_leak, correct_responses  # noqa: E402
 
 RUNNER = HERE / "run_eval.py"
+SHOW = HERE / "show_detail.py"
+MARKER = "TRACE-MARKER-7f3a"
 ID = re.compile(r"\bq\d{3}\b")
 
 AGENTS = {
@@ -57,6 +59,24 @@ time.sleep(30)
     "echo": """
 import sys
 print("payload: " + sys.stdin.read())
+""",
+    "tracer": """
+import json, os, sys
+from pathlib import Path
+q = json.loads(sys.stdin.read())
+path = os.environ["AGENT_TRACE_FILE"]
+with open(path, "a") as f:
+    f.write(json.dumps({"event": "sql", "turn": 1, "tool_use_id": "tu_1", "sql": "SELECT 1 -- TRACE-MARKER-7f3a"}) + "\\n")
+    f.write(json.dumps({"event": "tool_result", "tool_use_id": "tu_1", "content": path, "is_error": False}) + "\\n")
+    f.write("not json TRACE-MARKER-7f3a\\n")
+print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
+""",
+    "trace_crasher": """
+import json, os, sys
+sys.stdin.read()
+with open(os.environ["AGENT_TRACE_FILE"], "a") as f:
+    f.write(json.dumps({"event": "error", "message": "boom TRACE-MARKER-7f3a"}) + "\\n")
+sys.exit(1)
 """,
 }
 
@@ -272,6 +292,79 @@ def test_usage_null_for_responses_dir(env):
     ok(p, "responses-dir")
     summary, _ = env.latest(p)
     assert summary["usage"] is None and "usage:" not in p.stdout
+
+
+@with_env
+def test_trace_in_detail_only(env):
+    p = env.run("--split", "dev", "--label", "trace", agent="tracer")
+    ok(p, "tracer")
+    summary, detail = env.latest(p)
+    paths = []
+    for q in detail["questions"]:
+        events = q["trace"]
+        assert [e["event"] for e in events] == ["sql", "tool_result", "unparsed"], (q["id"], events)
+        assert MARKER in events[0]["sql"] and MARKER in events[2]["raw"]
+        paths.append(events[1]["content"])
+    assert len(set(paths)) == len(paths) == summary["n_questions"], "trace files are not per call"
+    assert not any(Path(x).exists() for x in paths), "temp trace files left behind"
+    (summary_path,) = env.summaries()
+    assert MARKER not in summary_path.read_text(), "trace in summary"
+    assert "trace" not in summary
+    assert MARKER not in p.stdout + p.stderr, "trace on console"
+    assert summary["rates"]["dev"]["accuracy"] == 1.0
+
+    p = env.run("--split", "dev", "--label", "trace-crash", "--questions", "q001", agent="trace_crasher")
+    ok(p, "trace_crasher")
+    _, detail = env.latest(p)
+    (q,) = detail["questions"]
+    assert q["result"]["outcome"] == "format_error"
+    assert q["trace"] == [{"event": "error", "message": f"boom {MARKER}"}]
+    assert MARKER not in p.stdout + p.stderr
+
+    p = env.run("--split", "dev", "--label", "no-trace", "--questions", "q001", agent="perfect")
+    ok(p, "perfect")
+    assert env.latest(p)[1]["questions"][0]["trace"] == []
+    rdir = env.dir / "responses"
+    rdir.mkdir()
+    p = env.run("--split", "dev", "--label", "files", "--questions", "q001", "--responses-dir", str(rdir))
+    ok(p, "responses-dir")
+    assert env.latest(p)[1]["questions"][0]["trace"] is None
+
+
+def show(*args):
+    return subprocess.run([sys.executable, str(SHOW), *map(str, args)], capture_output=True, text=True, timeout=60)
+
+
+@with_env
+def test_show_detail_dev(env):
+    p = env.run("--split", "dev", "--label", "trace", "--questions", "q001", agent="tracer")
+    ok(p, "tracer")
+    detail_path = env.runs / "detail" / Path(re.search(r"^summary: (.+)$", p.stdout, re.M).group(1)).name
+    s = show(detail_path, "q001")
+    assert s.returncode == 0, s.stderr
+    out = s.stdout
+    for header in ("== question q001", "== trace", "== response", "== outcome"):
+        assert header in out, header
+    assert Q["q001"]["question"].strip() in out
+    assert MARKER in out and "[sql, turn 1, tu_1]" in out and "[unparsed]" in out
+    assert "outcome: correct" in out and "reasons:" in out
+    s = show(detail_path, "q999")
+    assert s.returncode == 2 and s.stdout == ""
+
+
+@with_env
+def test_show_detail_refuses_hidden(env):
+    p = env.run("--split", "all", "--label", "all", "--confirm-hidden", agent="tracer")
+    ok(p, "all")
+    detail_path = env.runs / "detail" / Path(re.search(r"^summary: (.+)$", p.stdout, re.M).group(1)).name
+    hidden = [e for e in Q.values() if e["split"] == "hidden"]
+    assert hidden
+    for e in hidden:
+        s = show(detail_path, e["id"])
+        assert s.returncode == 2, (e["id"], s.returncode)
+        assert s.stdout == "" and "dev only" in s.stderr
+        assert e["question"].strip() not in s.stderr
+    assert show(detail_path, "q001").returncode == 0
 
 
 def test_hidden_values_list_is_not_empty():
