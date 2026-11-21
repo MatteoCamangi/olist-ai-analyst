@@ -80,13 +80,24 @@ def check_schema(entry, errors):
                           f"{len(exp['rows'])} expected rows")
     elif qtype == "set":
         want, got = set(exp["sets"]), set(answer)
+    elif qtype == "ranking":  # accepted interpretations (q016, q018): key columns plus one value column
+        want = set(exp["key"]) | {"value"}
+        got = set(answer["rows"]["fields"])
+        for name, rows in exp["interpretations"].items():
+            if answer["rows"].get("max_rows") != len(rows):
+                errors.append(f"answer_schema max_rows {answer['rows'].get('max_rows')!r} differs from "
+                              f"{len(rows)} rows in interpretation {name}")
+        missing = set(exp["accepted_interpretations"]) - set(exp["interpretations"])
+        if missing:
+            errors.append(f"accepted_interpretations without expected rows: {sorted(missing)}")
     else:
-        want = got = None  # behavior and q016: free-form schemas, no field match
+        want = got = None  # behavior: free-form schemas, no field match
     if want != got:
         errors.append(f"answer_schema fields {sorted(got)} differ from expected keys {sorted(want)}")
     text = yaml.safe_dump(schema)
     values = {k: v for k, v in exp.items() if k != "key"}  # key lists column names, not values
     leaked = {v for v in leaves(values) if isinstance(v, str) and len(v) >= 4 and v in text}
+    leaked |= set(doc_leaks([entry], text))  # numbers with 4+ digits, and strings as whole words
     if leaked:
         errors.append(f"answer_schema contains expected values: {sorted(leaked)}")
 
@@ -148,15 +159,27 @@ def check(con, entry):
         cmp_rows("rows", exp["rows"], rows, tol, errors)
 
     elif qtype == "set":
+        # Rows go to a set by their percentile_bucket column (q004); a single-set entry takes every row.
         (key,) = exp["key"]
+        if rows and "percentile_bucket" in rows[0]:
+            bucket_of = lambda r: r["percentile_bucket"]
+        elif len(exp["sets"]) == 1:
+            (only,) = exp["sets"]
+            bucket_of = lambda r: only
+        else:
+            errors.append("several sets but the gold result has no percentile_bucket column")
+            return errors
         for bucket, spec in exp["sets"].items():
-            act = {r[key] for r in rows if r["percentile_bucket"] == bucket}
+            ids = set(spec[f"{key}s"])
+            act = {r[key] for r in rows if bucket_of(r) == bucket}
             if len(act) != spec["count"]:
                 errors.append(f"{bucket}: expected count {spec['count']}, got {len(act)}")
-            missing, extra = set(spec["seller_ids"]) - act, act - set(spec["seller_ids"])
+            if len(ids) != spec["count"]:
+                errors.append(f"{bucket}: count {spec['count']} differs from {len(ids)} listed ids")
+            missing, extra = ids - act, act - ids
             if missing or extra:
                 errors.append(f"{bucket}: {len(missing)} ids missing, {len(extra)} unexpected")
-        extra_buckets = {r["percentile_bucket"] for r in rows} - set(exp["sets"])
+        extra_buckets = {bucket_of(r) for r in rows} - set(exp["sets"])
         if extra_buckets:
             errors.append(f"unexpected buckets: {sorted(extra_buckets)}")
 

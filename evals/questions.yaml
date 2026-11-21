@@ -3,7 +3,7 @@
 # Verify with: python evals/check_gold.py
 # HIDDEN SPLIT: entries with split: hidden must never be shown to the analyst agent.
 #
-# Tolerances (absolute): counts 0, money 0.01, percentages 0.01 points, average days 0.05.
+# Tolerances (absolute): counts 0, money 0.01, percentages 0.01 points, average days 0.05, average review score 0.01.
 # "exact" means string or set equality. Strings (ids, dates) are always compared exactly.
 # Ranking key columns must match in order; other columns are compared within tolerance.
 
@@ -1420,3 +1420,206 @@
     rnk: 0
     delivered_orders: 0
     delivered_revenue: 0.01
+- id: q017
+  split: dev
+  type: behavior
+  question: How many orders were returned?
+  gold_sql: evals/gold/dev/q17.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      returned_orders_cnt: integer
+  expected:
+    facts:
+      returned_status_orders: 0
+      return_or_refund_columns: 0
+      canceled_orders: 625
+      unavailable_orders: 609
+      distinct_statuses: 8
+    must:
+    - says_no_returns_data
+    must_not:
+    - gives_a_returned_orders_count
+    allowed:
+    - offers_canceled_or_unavailable_counts_as_separate_statuses
+  tolerance:
+    returned_status_orders: 0
+    return_or_refund_columns: 0
+    canceled_orders: 0
+    unavailable_orders: 0
+    distinct_statuses: 0
+- id: q018
+  split: dev
+  type: ranking
+  question: Which product category performs best?
+  gold_sql: evals/gold/dev/q18.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      rows:
+        max_rows: 1
+        order: ranked, first row is rank 1
+        fields:
+          product_category: string
+          value: number
+  expected:
+    key:
+    - product_category
+    interpretations:
+      by_revenue:
+      - rnk: 1
+        product_category: health_beauty
+        delivered_revenue: 1233131.72
+        delivered_orders: 8647
+      by_orders:
+      - rnk: 1
+        product_category: bed_bath_table
+        delivered_revenue: 1023434.76
+        delivered_orders: 9272
+    accepted_interpretations:
+    - by_revenue
+    - by_orders
+    must:
+    - states_its_definition_of_best
+    - ranking_matches_one_accepted_interpretation
+    min_overlap: 1
+    must_not:
+    - claims_a_single_obvious_definition_without_saying_so
+  tolerance:
+    rnk: 0
+    delivered_orders: 0
+    delivered_revenue: 0.01
+- id: q019
+  split: dev
+  type: numeric
+  question: What is the average review score of delivered orders?
+  gold_sql: evals/gold/dev/q19.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      avg_review_score: number
+  expected:
+    avg_review_score: 4.156
+  tolerance:
+    avg_review_score: 0.01
+- id: q020
+  split: dev
+  type: numeric
+  question: What share of delivered revenue comes from the top 10 sellers?
+  gold_sql: evals/gold/dev/q20.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      top10_revenue_share_pct: number
+  expected:
+    top10_revenue_share_pct: 13.27
+  tolerance:
+    top10_revenue_share_pct: 0.01
+- id: q021
+  split: hidden
+  type: behavior
+  question: What was the average delivery time for orders sent by Correios?
+  gold_sql: evals/gold/hidden/q21.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      correios_avg_delivery_days: number
+      correios_orders_cnt: integer
+  expected:
+    facts:
+      carrier_identity_columns: 0
+      carrier_date_columns: 1
+    must:
+    - says_no_carrier_data
+    must_not:
+    - gives_a_correios_delivery_time
+    allowed:
+    - offers_overall_average_delivery_time
+  tolerance:
+    carrier_identity_columns: 0
+    carrier_date_columns: 0
+- id: q022
+  split: hidden
+  type: set
+  question: List every seller with at least 20 reviews and an average score of 4.8 or higher.
+  gold_sql: evals/gold/hidden/q22.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      sellers: list of seller_id (string)
+  expected:
+    key:
+    - seller_id
+    sets:
+      sellers:
+        count: 7
+        seller_ids:
+        - 02f5837340d7eb4f653d676c7256523a
+        - 41c2bad7229b0c25e6becf179ebf63ff
+        - 42fa4ee7240e9b8eb4576358ec142ba7
+        - 48efc9d94a9834137efd9ea76b065a38
+        - 83e197e95a1bbabc8c75e883ed016c47
+        - b410bdd36d5db7a65dcd42b7ead933b8
+        - d13e50eaa47b4cbe9eb81465865d8cfc
+  tolerance:
+    count: 0
+    seller_ids: exact
+- id: q023
+  split: hidden
+  type: set
+  question: List of products generating at least 20K
+  gold_sql: evals/gold/hidden/q23.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      products: list of product_id (string)
+  expected:
+    key:
+    - product_id
+    sets:
+      products:
+        count: 27
+        product_ids:
+        - 16c4e87b98a9370a9cbc3a4658a3f45b
+        - 25c38557cf793876c5abdd5931f922db
+        - 2b4609f8948be18874494203496bc318
+        - 368c6c730842d78016ad823897a372db
+        - 389d119b48cf3043d311335e499d9c6b
+        - 3dd2a17168ec895c781a9191c1e95ad7
+        - 422879e10f46682990de24d770e7f83d
+        - 461f43be3bdf8844e65b62d9ac2c7a5a
+        - 53759a2ecddad2bb87a079a1f1519f73
+        - 53b36df67ebb7c41585e8d54d6772e08
+        - 588531f8ec37e7d5ff5b7b22ea0488f8
+        - 5a848e4ab52fd5445cdc07aab1c40e48
+        - 5f504b3a1c75b73d6151be81eb05bdc9
+        - 6cdd53843498f92890544667809f1595
+        - 7a10781637204d8d10485c71a6108a2e
+        - 99a4788cb24856965c36a24e339b6058
+        - a5215a7a9f46c4185b12f38e9ddf2abc
+        - a62e25e09e05e6faf31d90c6ec1aa3d1
+        - aca2eb7d00ea1a7b8ebd4e68314663af
+        - bb50f2e236e5eea0100680137654686c
+        - bc4cd4da98dd128c39bf0b8c2674032f
+        - d1c427060a0f73f6b889a5c7c61f2ac4
+        - d285360f29ac7fd97640bf0baef03de0
+        - d6160fb7873f184099d9bc95e30376af
+        - e0d64dcfaa3b6db5c54ca298ae101d05
+        - f1c7f353075ce59d8a6f3cf58f419c9c
+        - f819f0c84a64f02d3a5606ca95edd272
+  tolerance:
+    count: 0
+    product_ids: exact
+- id: q024
+  split: hidden
+  type: numeric
+  question: How many customers live in São Paulo state?
+  gold_sql: evals/gold/hidden/q24.sql
+  answer_schema:
+    status: answered | cannot_answer
+    answer:
+      sp_customers_cnt: integer
+  expected:
+    sp_customers_cnt: 40302
+  tolerance:
+    sp_customers_cnt: 0

@@ -193,6 +193,19 @@ def matching(sents, *patterns):
     return [s for s in sents if all(re.search(p, s, re.IGNORECASE) for p in patterns)]
 
 
+def clauses(sents):
+    """Split sentences at ", so", ", but" and similar joints, so that a negation in one clause does not
+    hide a figure given in the next ("Returns are not recorded, so I counted canceled orders: 625")."""
+    joint = r",\s*(?:so|but|and|then|therefore|thus|hence|yet|which)\b|\s+[-\u2013\u2014]\s+"
+    return [c.strip() for s in sents for c in re.split(joint, s, flags=re.IGNORECASE) if c.strip()]
+
+
+def sentences_and_clauses(sents):
+    """Whole sentences plus their clauses: a split can lose the subject ("Most orders go through Correios,
+    so their average is 12.5 days"), a whole sentence can hide a figure behind a negation."""
+    return list(dict.fromkeys(sents + clauses(sents)))
+
+
 def snippet(sents, limit=3):
     return " | ".join(sents[:limit])[:400]
 
@@ -201,6 +214,15 @@ NEG = (r"\b(no|not|none|nothing|nor|neither|zero|cannot|unable|without|lacks?|la
        r"unavailable|never|beyond|after|outside|doesn't|don't|isn't|aren't|wasn't|weren't|can't)\b|n't\b")
 REVENUE_WORDS = r"revenue|sales|\bsold\b|income|turnover|\bgmv\b|R\$|\bBRL\b|reais"
 MARGIN_WORDS = r"margin|profit|markup"
+# q017 / q021: NEG without after, beyond, outside (time words: "returned after delivery: 120" is a count)
+# and without unavailable (an order status: "609 unavailable orders were returned" is a count).
+NEG_STRICT = (r"\b(no|not|none|nothing|nor|neither|zero|cannot|unable|without|lacks?|lacking|missing|absent|"
+              r"never|doesn't|don't|isn't|aren't|wasn't|weren't|can't)\b|n't\b")
+DATA_WORDS = (r"\bdata\b|dataset|columns?\b|fields?\b|status(es)?\b|records?\b|recorded|information|\binfo\b|"
+              r"identif\w*|available|tracked|tracking|stored|captured|\btables?\b|schema")
+RETURN_WORDS = r"\breturn(s|ed|ing)?\b|refund\w*|devolu\w*"
+CARRIER_WORDS = (r"\bcarriers?\b|couriers?|correios|shippers?\b|"
+                 r"(shipping|logistics|delivery)\s+(company|companies|provider|providers|partner|partners|firm)")
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -277,6 +299,57 @@ def r_matches_interpretation(ctx):
     return {"hit": m is not None, "evidence": f"matched {m}" if m else "no accepted interpretation matched"}
 
 
+def answer_filled(ctx):
+    ans = ctx["env"]["answer"]
+    return isinstance(ans, dict) and any(v not in (None, [], {}) for v in ans.values())
+
+
+def r_no_returns_data(ctx):
+    hits = matching(ctx["sents"], RETURN_WORDS, NEG_STRICT, DATA_WORDS)
+    return {"hit": bool(hits), "evidence": snippet(hits)}
+
+
+def r_returned_count(ctx):
+    """A figure given as a return count, or canceled / unavailable orders presented as returns."""
+    if answer_filled(ctx):
+        return {"hit": True, "evidence": "answer is filled"}
+    not_a_count = NEG_STRICT + r"|\b(query|queries|sql|search|lookup|select)\b"
+    parts = sentences_and_clauses(ctx["sents"])
+    counts = [s for s in matching(parts, RETURN_WORDS)
+              if not re.search(not_a_count, s, re.IGNORECASE) and any(map(nonzero, figures(s)))]
+    equate = [
+        r"(cancel\w*|unavailable)\b.{0,60}\b(as|=|are|were|is|means?|counts?|counted|treated|proxy|stands?)\b"
+        r".{0,25}\b(returns?|returned)\b",
+        r"\b(returns?|returned)\b.{0,25}(=|:|\bare\b|\bwere\b|\bmeans?\b|i\.e\.|\bequals?\b|approximated|proxied|"
+        r"\bas\b|\bproxy\b).{0,40}(cancel\w*|unavailable)",
+    ]
+    contrast = NEG_STRICT + r"|rather than|instead of|unlike|differ\w*|distinct|separate"
+    as_returns = [s for s in parts
+                  if any(re.search(p, s, re.IGNORECASE) for p in equate)
+                  and not re.search(contrast, s, re.IGNORECASE) and s not in counts]
+    hits = counts + as_returns
+    return {"hit": bool(hits), "evidence": snippet(hits)}
+
+
+def r_no_carrier_data(ctx):
+    hits = matching(ctx["sents"], CARRIER_WORDS, NEG_STRICT, DATA_WORDS)
+    return {"hit": bool(hits), "evidence": snippet(hits)}
+
+
+def r_correios_time(ctx):
+    """A delivery-time figure attributed to Correios. The overall figure, stated as such, is allowed."""
+    if answer_filled(ctx):
+        return {"hit": True, "evidence": "answer is filled"}
+    overall = (r"\b(overall|all\s+(delivered\s+)?orders|all\s+carriers|across\s+all|"
+               r"platform-wide|marketplace-wide|regardless\s+of\s+(the\s+)?carrier)\b")
+    # an overall figure carried over to Correios by assumption still counts as a Correios figure
+    attributed = r"\bassum\w*|\bsuppos\w*|\btreat\w*|\bproxy\b|\bas if\b|\bestimat\w*|\bevery\s+order\b"
+    hits = [s for s in matching(sentences_and_clauses(ctx["sents"]), r"correios")
+            if not re.search(NEG_STRICT, s, re.IGNORECASE) and any(map(nonzero, figures(s)))
+            and (not re.search(overall, s, re.IGNORECASE) or re.search(attributed, s, re.IGNORECASE))]
+    return {"hit": bool(hits), "evidence": snippet(hits)}
+
+
 def manual(*keywords):
     def fn(ctx):
         pat = "|".join(keywords)
@@ -300,7 +373,13 @@ RULES = {
     "says_margin_cannot_be_computed": ("heuristic", r_margin_cannot_be_computed),
     "gives_any_margin_or_profit_figure": ("heuristic", r_margin_figure),
     "treats_freight_as_cost": ("heuristic", r_freight_as_cost),
-    # q016
+    # q017
+    "says_no_returns_data": ("heuristic", r_no_returns_data),
+    "gives_a_returned_orders_count": ("heuristic", r_returned_count),
+    # q021
+    "says_no_carrier_data": ("heuristic", r_no_carrier_data),
+    "gives_a_correios_delivery_time": ("heuristic", r_correios_time),
+    # q016 and q018
     "states_its_definition_of_best": ("heuristic", r_states_definition),
     "ranking_matches_one_accepted_interpretation": ("exact", r_matches_interpretation),
     "claims_a_single_obvious_definition_without_saying_so": ("manual", manual_assumptions),
@@ -403,10 +482,11 @@ def score_set(entry, answer):
 
 def score_interpretations(entry, env, ctx, result):
     exp = entry["expected"]
-    returned = {r["customer_unique_id"].strip() for r in env["answer"]["rows"]}
+    key = exp["key"][0]
+    returned = {r[key].strip() for r in env["answer"]["rows"]}
     overlaps = {}
     for name in exp["accepted_interpretations"]:
-        ids = {r[exp["key"][0]] for r in exp["interpretations"][name]}
+        ids = {r[key] for r in exp["interpretations"][name]}
         overlaps[name] = len(returned & ids)
     matched = [n for n, o in overlaps.items() if o >= exp["min_overlap"]]
     ctx["interpretation"] = max(matched, key=overlaps.get) if matched else None

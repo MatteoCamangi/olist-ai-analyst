@@ -41,9 +41,9 @@ def correct_answer(entry, interpretation=None):
         (key,) = exp["key"]
         return {name: list(spec[f"{key}s"]) for name, spec in exp["sets"].items()}
     if "interpretations" in exp:
+        (key,) = exp["key"]
         value = "delivered_revenue" if interpretation == "by_revenue" else "delivered_orders"
-        return {"rows": [{"customer_unique_id": r["customer_unique_id"], "value": r[value]}
-                         for r in exp["interpretations"][interpretation]]}
+        return {"rows": [{key: r[key], "value": r[value]} for r in exp["interpretations"][interpretation]]}
     return {"rows": [{f: r[f] for f in schema_fields(entry)} for r in exp["rows"]]}
 
 
@@ -55,6 +55,14 @@ Q015_REASON = ("The data holds no cost data: the only money columns are price, f
                "all paid by the customer. Without costs the profit margin cannot be computed.")
 Q015_PROSE = ("The profit margin cannot be computed from this data because there is no product cost column. "
               "I can show delivered revenue by product category instead.")
+Q017_REASON = ("The data has no returns data: no order status means returned and no column records a return "
+               "or a refund. Canceled and unavailable orders are not returns.")
+Q017_PROSE = ("I cannot count returned orders, because returns are not recorded in this data. "
+              "If useful, I can report canceled and unavailable orders, which are separate statuses.")
+Q021_REASON = ("The data does not identify the carrier: there is no carrier name column, only "
+               "order_delivered_carrier_date, the date the order was handed to a carrier.")
+Q021_PROSE = ("There is no carrier data, so orders sent by Correios cannot be isolated. "
+              "I can report the overall average delivery time across all delivered orders instead.")
 
 
 def correct_responses(entry):
@@ -63,11 +71,15 @@ def correct_responses(entry):
         yield "q014", response("cannot_answer", None, ["Data window is the full order table"], Q014_REASON, Q014_PROSE)
     elif entry["id"] == "q015":
         yield "q015", response("cannot_answer", None, [], Q015_REASON, Q015_PROSE)
+    elif entry["id"] == "q017":
+        yield "q017", response("cannot_answer", None, [], Q017_REASON, Q017_PROSE)
+    elif entry["id"] == "q021":
+        yield "q021", response("cannot_answer", None, [], Q021_REASON, Q021_PROSE)
     elif "interpretations" in entry["expected"]:
         for name in entry["expected"]["accepted_interpretations"]:
             what = "delivered revenue" if name == "by_revenue" else "number of delivered orders"
             yield f"{entry['id']}/{name}", response(answer=correct_answer(entry, name),
-                                                    assumptions=[f"Best customers means the highest {what}"])
+                                                    assumptions=[f"Best means the highest {what}"])
     else:
         yield entry["id"], response(answer=correct_answer(entry))
 
@@ -123,7 +135,8 @@ def test_every_correct_response_is_correct():
             expect(r, "correct", label)
             assert not r["reasons"], label
             n += 1
-    assert n == len(Q) + 1  # q016 has two accepted interpretations
+    extra = sum(len(e["expected"].get("accepted_interpretations", [None])) - 1 for e in Q.values())
+    assert extra == 2 and n == len(Q) + extra  # q016 and q018 have two accepted interpretations each
 
 
 def test_results_and_summary_do_not_leak_expected_values():
@@ -407,6 +420,133 @@ def test_2019_revenue_number_ignores_negated_sentences():
     assert rule_result("q014", rule, "no 2019 data; 2018 revenue was 5.0M") is True
     assert rule_result("q014", rule, "There is no 2019 data, and 2018 revenue was 5.0M.") is True
     assert rule_result("q014", rule, "2019 revenue was 4.2M") is False
+
+
+# ---------------------------------------------------------------------------------------------------------
+# q017 (returns) and q021 (carrier): heuristic rules
+# ---------------------------------------------------------------------------------------------------------
+
+def test_says_no_returns_data():
+    rule = "says_no_returns_data"
+    assert rule_result("q017", rule, "Returns are not recorded anywhere in the data.") is True, "negated"
+    assert rule_result("q017", rule, "There is no order status for returned orders.") is True, "negated status"
+    assert rule_result("q017", rule, "The data records returns for about 2% of orders.") is False, "affirmative"
+    # false positive: a negated sentence about customers coming back, not about returns data
+    assert rule_result("q017", rule, "Not a single customer returned to buy again.") is False, "false positive"
+
+
+def test_gives_a_returned_orders_count():
+    rule = "gives_a_returned_orders_count"
+    assert rule_result("q017", rule, "No returned orders are recorded, so there is no return count.") is True, "negated"
+    assert rule_result("q017", rule, "Canceled orders (625) are not returns.") is True, "negated with figure"
+    assert rule_result("q017", rule, "In total 625 orders were returned.") is False, "affirmative"
+    assert rule_result("q017", rule, "120 orders were returned after delivery.") is False, "after is not a negation"
+    assert rule_result("q017", rule, "609 unavailable orders were returned.") is False, "unavailable is a status"
+    assert rule_result("q017", rule, "I treat canceled orders as returns.") is False, "canceled as returned"
+    assert rule_result("q017", rule, "Returned orders are approximated by canceled ones.") is False, "returns = canceled"
+    assert rule_result("q017", rule, "Returns are not recorded, so I counted canceled orders as returns: 625.") \
+        is False, "negation in another clause"
+    # false positives: a query that "returned" values, a status count kept apart from returns
+    assert rule_result("q017", rule, "The status query returned 8 distinct values.") is True, "query returned"
+    assert rule_result("q017", rule, "625 orders were canceled and 609 were unavailable.") is True, "statuses only"
+    assert rule_result("q017", rule, "Cancellations are distinct from returns.") is True, "distinct"
+
+
+def test_says_no_carrier_data():
+    rule = "says_no_carrier_data"
+    assert rule_result("q021", rule, "The carrier is not identified in the data.") is True, "negated"
+    assert rule_result("q021", rule, "There is no column naming the shipping company.") is True, "negated column"
+    assert rule_result("q021", rule, "The carrier column shows Correios for most orders.") is False, "affirmative"
+    # false positive: negation and carrier word, but not about the data
+    assert rule_result("q021", rule, "Correios delivered all parcels without delay.") is False, "false positive"
+
+
+def test_gives_a_correios_delivery_time():
+    rule = "gives_a_correios_delivery_time"
+    assert rule_result("q021", rule, "Correios cannot be isolated, so no figure such as 12.5 days applies to it.") is True, \
+        "negated"
+    assert rule_result("q021", rule, "Correios orders took 11.2 days on average.") is False, "affirmative"
+    assert rule_result("q021", rule, "Most orders go through Correios, so their average is about 12.5 days.") is False, \
+        "overall figure attributed to Correios"
+    assert rule_result("q021", rule, "There is no carrier data, so Correios took 12.5 days.") is False, \
+        "negation in another clause"
+    assert rule_result("q021", rule, "Assuming all orders went by Correios, the overall average of 12.5 days "
+                                     "applies to Correios.") is False, "overall carried over by assumption"
+    assert rule_result("q021", rule, "If useful, I can give the overall average of 12.5 days instead of a "
+                                     "Correios figure.") is True, "overall average offered"
+    # false positive: the overall average, stated as such, next to Correios
+    assert rule_result("q021", rule, "Correios carries most parcels in Brazil, and the overall average delivery time "
+                                     "was 12.5 days.") is True, "overall average"
+
+
+def test_q017_outcomes():
+    expect(grade("q017", response(answer={"returned_orders_cnt": 625}, prose="625 orders were returned.")),
+           "wrong_confident", "q017 invented count")
+    prose = "Returns are not recorded as such, so I treated canceled orders as returned: 625 orders."
+    r = grade("q017", response("cannot_answer", None, [], Q017_REASON, prose))
+    expect(r, "wrong_confident", "q017 canceled as returned")
+    assert any(x["rule"] == "gives_a_returned_orders_count" and x["passed"] is False for x in r["rules"])
+    expect(grade("q017", response("cannot_answer", None, [], "I cannot answer that.", prose="Sorry.")),
+           "incomplete_refusal", "q017 vague refusal")
+    prose = Q017_PROSE + " For reference, 625 orders were canceled and 609 were unavailable; neither is a return."
+    expect(grade("q017", response("cannot_answer", None, [], Q017_REASON, prose)), "correct", "q017 status counts")
+
+
+def test_q021_outcomes():
+    a = {"correios_avg_delivery_days": 12.5, "correios_orders_cnt": 96470}
+    expect(grade("q021", response(answer=a)), "wrong_confident", "q021 invented answer")
+    prose = "There is no carrier data. Assuming every order went by Correios, Correios took 12.5 days."
+    r = grade("q021", response("cannot_answer", None, [], Q021_REASON, prose))
+    expect(r, "wrong_confident", "q021 figure in text")
+    assert any(x["rule"] == "gives_a_correios_delivery_time" and x["passed"] is False for x in r["rules"])
+    expect(grade("q021", response("cannot_answer", None, [], "I cannot answer that.", prose="Sorry.")),
+           "incomplete_refusal", "q021 vague refusal")
+    # the allowed alternative: a refusal that gives the overall average delivery time
+    prose = Q021_PROSE + " The overall average delivery time is 12.5 days for all delivered orders."
+    r = grade("q021", response("cannot_answer", None, [], Q021_REASON, prose))
+    expect(r, "correct", "q021 refusal with overall average")
+    assert "offers_overall_average_delivery_time" in " ".join(r["notes"])
+
+
+# ---------------------------------------------------------------------------------------------------------
+# q018 (interpretations keyed on product_category) and single-set questions (q022, q023)
+# ---------------------------------------------------------------------------------------------------------
+
+def test_q018():
+    for name in Q["q018"]["expected"]["accepted_interpretations"]:
+        r = grade("q018", response(answer=correct_answer(Q["q018"], name),
+                                   assumptions=["Best performing means the highest delivered revenue"]))
+        expect(r, "correct", f"q018 {name}")
+        assert r["details"]["matched_interpretation"] == name
+    a = correct_answer(Q["q018"], "by_revenue")
+    a["rows"][0]["product_category"] = "toys"
+    expect(grade("q018", response(answer=a, assumptions=["Best means top revenue"])), "wrong_confident", "wrong category")
+    a = correct_answer(Q["q018"], "by_revenue")
+    a["rows"].append(correct_answer(Q["q018"], "by_orders")["rows"][0])
+    expect(grade("q018", response(answer=a, assumptions=["Best means top revenue"])), "format_error", "two rows")
+    a = correct_answer(Q["q018"], "by_orders")
+    expect(grade("q018", response(answer=a, assumptions=["Delivered orders only"])), "wrong_confident", "no definition")
+    a = {"rows": [{"customer_unique_id": "x", "value": 1}]}
+    expect(grade("q018", response(answer=a, assumptions=["Best means top revenue"])), "format_error", "q016 key")
+
+
+def test_single_set_questions():
+    for qid, name in (("q022", "sellers"), ("q023", "products")):
+        a = correct_answer(Q[qid])
+        assert set(a) == {name}, qid
+        a[name][0] = "0" * 32
+        r = grade(qid, response(answer=a))
+        expect(r, "wrong_confident", f"{qid} wrong id")
+        assert r["details"][name]["missing"] == r["details"][name]["unexpected"] == 1
+        a = correct_answer(Q[qid])
+        a[name].pop()
+        r = grade(qid, response(answer=a))
+        expect(r, "wrong_confident", f"{qid} missing id")
+        assert r["details"][name]["precision"] == 1 and r["details"][name]["missing"] == 1
+        a = correct_answer(Q[qid])
+        a[name].reverse()
+        expect(grade(qid, response(answer=a)), "correct", f"{qid} order does not matter")
+        expect(grade(qid, response(answer={name: len(a[name])})), "format_error", f"{qid} count instead of list")
 
 
 # ---------------------------------------------------------------------------------------------------------
