@@ -1,0 +1,43 @@
+{
+  "timestamp": "20261121T185845Z",
+  "split": "dev",
+  "label": "abl-floor",
+  "git_sha": "9f1829c2c5c8feb06b86370f786085702d0b6a89",
+  "git_dirty": true,
+  "agent_cmd": "python agent/analyst.py",
+  "responses_dir": null,
+  "timeout": 900.0,
+  "n_questions": 12,
+  "rates": {
+    "dev": {
+      "questions": 12,
+      "answerable": 10,
+      "correct": 12,
+      "accuracy": 1.0,
+      "wrong_confident_rate": 0.0,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.0
+    },
+    "all": {
+      "questions": 12,
+      "answerable": 10,
+      "correct": 12,
+      "accuracy": 1.0,
+      "wrong_confident_rate": 0.0,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.0
+    }
+  },
+  "usage": {
+    "input_tokens": 196109,
+    "output_tokens": 15340,
+    "tool_calls": 50
+  },
+  "agent_config": {
+    "model": "claude-haiku-5-5",
+    "docs": "none",
+    "brief": "minimal"
+  }
+}
