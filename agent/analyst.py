@@ -16,6 +16,9 @@ Configuration (ablations), from environment variables; unset or empty means the 
     ANALYST_BRIEF   full (default) | minimal: drops the rules between the rules markers of agent/BRIEF.md
                     (role, tool, limits and the answer-format instruction stay). In full mode only the marker
                     lines are removed.
+    The lines of agent/BRIEF.md between docs markers (the document line of section 2, the relative-dates rule)
+    are dropped unless ANALYST_DOCS is full; in section 2 a one-line replacement for the mode takes their place.
+    Marker lines never reach the prompt.
 
 Exit codes: 0 answered (the envelope may still say cannot_answer), 1 failure (API error after retries, refusal,
 output limit hit (stop_reason max_tokens) or empty answer), 2 bad input, bad configuration or missing
@@ -65,6 +68,11 @@ MODEL_ENV, DOCS_ENV, BRIEF_ENV = "ANALYST_MODEL", "ANALYST_DOCS", "ANALYST_BRIEF
 DOCS_MODES = ("full", "schema", "none")
 BRIEF_MODES = ("full", "minimal")
 RULES_START, RULES_END = "<!-- rules:start -->", "<!-- rules:end -->"  # whole lines in agent/BRIEF.md
+DOCS_START, DOCS_END = "<!-- docs:start -->", "<!-- docs:end -->"      # lines that depend on the documents
+DOCS_REPLACEMENT = {  # takes the place of the section 2 docs block when the documents are left out
+    "schema": "- You know the table and column descriptions of the marts.",
+    "none": "- You have no documents; discover tables and columns with information_schema.",
+}
 _MODEL_ID = re.compile(r"claude-\S+")
 
 # Every file the agent's prompt is built from. Nothing else is ever read for the model.
@@ -162,25 +170,42 @@ def read_config(env):
     return {"model": model, "docs": docs, "brief": brief}
 
 
-def brief_text(mode="full"):
-    """agent/BRIEF.md without its marker lines; minimal also drops every line between a start and an end marker."""
+def brief_text(mode="full", docs="full"):
+    """agent/BRIEF.md without its marker lines (always removed).
+
+    minimal drops every line inside a rules block. A docs mode other than full drops every line inside a docs block;
+    the docs block of section 2 is replaced by DOCS_REPLACEMENT[docs].
+    """
     if mode not in BRIEF_MODES:
         raise ValueError(f"unknown brief mode {mode!r}")
-    kept, inside, seen = [], False, 0
+    if docs not in DOCS_MODES:
+        raise ValueError(f"unknown docs mode {docs!r}")
+    kept, heading = [], ""
+    inside = {"rules": False, "docs": False}
+    seen = {"rules": 0, "docs_section_2": 0}
+    markers = {RULES_START: ("rules", True), RULES_END: ("rules", False),
+               DOCS_START: ("docs", True), DOCS_END: ("docs", False)}
     for line in read_allowed(BRIEF).splitlines(keepends=True):
-        marker = line.strip()
-        if marker == RULES_START:
-            if inside:
-                raise ValueError("nested rules:start marker in BRIEF.md")
-            inside, seen = True, seen + 1
-        elif marker == RULES_END:
-            if not inside:
-                raise ValueError("rules:end marker without rules:start in BRIEF.md")
-            inside = False
-        elif not inside or mode == "full":
-            kept.append(line)
-    if inside or not seen:
-        raise ValueError("BRIEF.md needs balanced rules markers")
+        if line.startswith("## "):
+            heading = line
+        marker = markers.get(line.strip())
+        if marker:
+            kind, opening = marker
+            if inside[kind] == opening:
+                raise ValueError(f"unbalanced or nested {kind} markers in BRIEF.md")
+            inside[kind] = opening
+            if opening and kind == "rules":
+                seen["rules"] += 1
+            if opening and kind == "docs" and heading.startswith("## 2."):
+                seen["docs_section_2"] += 1
+                if docs != "full":
+                    kept.append(DOCS_REPLACEMENT[docs] + "\n")
+            continue
+        if (inside["rules"] and mode == "minimal") or (inside["docs"] and docs != "full"):
+            continue
+        kept.append(line)
+    if any(inside.values()) or not seen["rules"] or seen["docs_section_2"] != 1:
+        raise ValueError("BRIEF.md needs balanced rules markers and one docs block in section 2")
     return "".join(kept)
 
 
@@ -192,7 +217,7 @@ def build_system_prompt(docs="full", brief="full"):
         "Use the run_sql tool to query the warehouse; every number in your answer must come from a query you ran. "
         "Your final message is the answer itself: a few sentences for a human reader, then the JSON envelope as the "
         "last ```json block, exactly as in the answer format at the end of this prompt.",
-        "# Brief\n\n" + brief_text(brief).strip(),
+        "# Brief\n\n" + brief_text(brief, docs).strip(),
     ]
     if docs == "full":
         sections.append("# Metric definitions (docs/metrics.md)\n\n" + read_allowed(METRICS).strip())

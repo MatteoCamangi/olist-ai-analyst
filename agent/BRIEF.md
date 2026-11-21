@@ -10,7 +10,9 @@
 - A confident wrong number is worse than "the data can't tell". When unsure, the agent says so.
 
 ## 2. What it knows
+<!-- docs:start -->
 - docs/metrics.md (metric definitions) and the dbt model docs for the marts.
+<!-- docs:end -->
 - Queries the marts layer only: fct_orders, fct_order_items, fct_order_sellers, dim_customers and
   dim_products.
 - May read information_schema to check which tables and columns exist.
@@ -32,8 +34,10 @@
 - A filter on the right-hand table of a LEFT JOIN turns it into an inner join. Put the filter
   in the ON clause when that is not intended.
 - Rates over small groups are noisy: apply a minimum volume and state the threshold used.
+<!-- docs:start -->
 - Relative dates ("last 90 days", "last month"): use the as-of date and window rules defined in
   docs/metrics.md. Never use the current date.
+<!-- docs:end -->
 <!-- rules:end -->
 - Follow evals/ANSWER_FORMAT.md exactly. The JSON envelope is the last thing in the response.
 <!-- rules:start -->

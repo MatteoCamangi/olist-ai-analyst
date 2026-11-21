@@ -519,10 +519,19 @@ def test_system_prompt():
     assert system == analyst.build_system_prompt(), "prompt must be deterministic for caching"
 
 
+MARKERS = ("<!-- rules:start -->", "<!-- rules:end -->", "<!-- docs:start -->", "<!-- docs:end -->")
+SCHEMA_LINE = "You know the table and column descriptions of the marts."
+NONE_LINE = "You have no documents; discover tables and columns with information_schema."
+
+
+def all_prompts():
+    return {(d, b): analyst.build_system_prompt(d, b) for d in analyst.DOCS_MODES for b in analyst.BRIEF_MODES}
+
+
 def old_build_system_prompt():
     """A literal copy of the prompt formula before ablations; the brief is BRIEF.md without its marker lines."""
     brief = "".join(ln for ln in (ROOT / analyst.BRIEF).read_text().splitlines(keepends=True)
-                    if ln.strip() not in (analyst.RULES_START, analyst.RULES_END))
+                    if ln.strip() not in MARKERS)
     return "\n\n".join([
         "You are the Olist analyst agent described in the brief below. You answer one question per conversation. "
         "Use the run_sql tool to query the warehouse; every number in your answer must come from a query you ran. "
@@ -600,7 +609,7 @@ def test_none_mode_has_no_document_text():
         assert body not in system, body[:80]
     assert "### marts." not in system and "# Marts" not in system and "# Metric definitions" not in system
     assert answer_format_text() in system and "# Brief" in system
-    assert system == "\n\n".join([system.split("\n\n# Brief")[0], "# Brief\n\n" + analyst.brief_text().strip(),
+    assert system == "\n\n".join([system.split("\n\n# Brief")[0], "# Brief\n\n" + analyst.brief_text("full", "none").strip(),
                                    "# Answer format (evals/ANSWER_FORMAT.md)\n\n" + answer_format_text()])
 
 
@@ -613,7 +622,7 @@ def test_minimal_brief_drops_rules():
     for docs in analyst.DOCS_MODES:
         system = analyst.build_system_prompt(docs, "minimal")
         brief = system.split("# Brief\n\n", 1)[1].split("\n\n# ", 1)[0]
-        assert brief == minimal.strip()
+        assert brief == analyst.brief_text("minimal", docs).strip()
         hits = [ln for ln in dropped if ln in brief]
         assert not hits, hits
         assert kept in brief and "<!--" not in brief
@@ -637,6 +646,7 @@ def test_env_config_reaches_api():
     assert code == 0, err
     assert [c["model"] for c in client.calls] == ["claude-test-x"] * 2
     assert all(c["system"] == analyst.build_system_prompt("none", "minimal") for c in client.calls)
+    assert all(NONE_LINE in c["system"] and "docs/metrics.md" not in c["system"] for c in client.calls)
     assert usage_line(err, config=True) == {"model": "claude-test-x", "docs": "none", "brief": "minimal"}
     assert usage_line(err) == {"input_tokens": 200, "output_tokens": 20, "tool_calls": 1}
 
@@ -652,6 +662,78 @@ def test_invalid_config_exits_2():
         assert "bad config" in err and next(iter(env)) in err, err
         assert usage_line(err, config=True) == dict.fromkeys(CONFIG_KEYS), err
         assert usage_line(err) == {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0}
+
+
+def test_markers_never_in_prompt():
+    assert (analyst.RULES_START, analyst.RULES_END, analyst.DOCS_START, analyst.DOCS_END) == MARKERS
+    brief_md = (ROOT / analyst.BRIEF).read_text()
+    assert all(m in brief_md for m in MARKERS), "BRIEF.md lost a marker"
+    for key, system in all_prompts().items():
+        hits = [m for m in MARKERS if m in system]
+        assert not hits and "<!--" not in system and "-->" not in system, (key, hits)
+
+
+def test_full_docs_prompt_matches_previous_default():
+    prompts = all_prompts()
+    old = old_build_system_prompt()
+    assert prompts[("full", "full")] == old
+    assert SCHEMA_LINE not in old and NONE_LINE not in old
+    assert "- docs/metrics.md (metric definitions) and the dbt model docs for the marts." in old
+    assert "window rules defined in\n  docs/metrics.md. Never use the current date." in old
+    # full + minimal: the old prompt with exactly the rules lines removed (docs markers change nothing)
+    rules = [ln for block in (ROOT / analyst.BRIEF).read_text().split(analyst.RULES_START)[1:]
+             for ln in block.split(analyst.RULES_END)[0].splitlines() if ln.strip() and ln.strip() not in MARKERS]
+    expected = old
+    for ln in rules:
+        assert expected.count(ln + "\n") == 1, ln
+        expected = expected.replace(ln + "\n", "", 1)
+    assert prompts[("full", "minimal")] == expected
+
+
+def test_ablated_prompts_do_not_mention_metrics_doc():
+    for (docs, brief), system in all_prompts().items():
+        if docs == "full":
+            continue
+        assert "docs/metrics.md" not in system, (docs, brief)
+        assert "dbt model docs" not in system and "window rules defined in" not in system, (docs, brief)
+        if docs == "none":
+            assert "metrics.md" not in system, (docs, brief)
+
+
+def test_docs_replacement_lines():
+    for (docs, brief), system in all_prompts().items():
+        section_2 = system.split("## 2. What it knows\n", 1)[1].split("\n## 3.", 1)[0]
+        lines = section_2.splitlines()
+        want = {"full": None, "schema": SCHEMA_LINE, "none": NONE_LINE}[docs]
+        for line in (SCHEMA_LINE, NONE_LINE):
+            assert system.count(line) == (1 if line == want else 0), (docs, brief, line)
+        if want:
+            assert lines[0] == "- " + want, (docs, brief, lines[0])
+        else:
+            assert lines[0].startswith("- docs/metrics.md"), (docs, brief)
+
+
+def test_brief_markers_validated():
+    original = analyst.read_allowed
+    good = (ROOT / analyst.BRIEF).read_text()
+    broken = {
+        "docs end dropped": good.replace(analyst.DOCS_END + "\n", "", 1),
+        "docs start dropped": good.replace(analyst.DOCS_START + "\n", "", 1),
+        "no docs in section 2": good.replace("## 2. What it knows", "## 2b What it knows"),
+        "rules end dropped": good.replace(analyst.RULES_END + "\n", "", 1),
+    }
+    try:
+        for label, text in broken.items():
+            assert text != good, label
+            analyst.read_allowed = lambda rel, t=text: t if rel == analyst.BRIEF else original(rel)
+            for docs in analyst.DOCS_MODES:
+                try:
+                    analyst.brief_text("full", docs)
+                except ValueError:
+                    continue
+                raise AssertionError(f"{label}: accepted with docs={docs}")
+    finally:
+        analyst.read_allowed = original
 
 
 def test_user_message_holds_question_and_schema_only():
