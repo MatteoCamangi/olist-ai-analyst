@@ -1620,6 +1620,6 @@
     answer:
       sp_customers_cnt: integer
   expected:
-    sp_customers_cnt: 40302
+    sp_customers_cnt: 39156
   tolerance:
     sp_customers_cnt: 0

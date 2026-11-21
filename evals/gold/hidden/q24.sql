@@ -1,7 +1,8 @@
 /*
 Q24: How many customers live in São Paulo state?
-Customers = distinct customer_unique_id with an order of any status and customer_state = 'SP'.
-A person with order records in several states counts if any record is in SP.
+Customers as defined in docs/metrics.md: distinct customer_unique_id with at least one delivered order.
+Location is customer_state on the order's customer record. A person with delivered orders in several
+states counts if any of their delivered orders is in SP.
 */
 
 SELECT
@@ -9,4 +10,5 @@ SELECT
 FROM raw.customers c
 JOIN raw.orders o
     ON c.customer_id = o.customer_id
-WHERE c.customer_state = 'SP';
+WHERE o.order_status = 'delivered'
+  AND c.customer_state = 'SP';
