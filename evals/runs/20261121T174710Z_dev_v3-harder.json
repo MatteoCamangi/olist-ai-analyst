@@ -1,0 +1,38 @@
+{
+  "timestamp": "20261121T174710Z",
+  "split": "dev",
+  "label": "v3-harder",
+  "git_sha": "27f44c8b81e9b4577a6308395c148da9e42706e7",
+  "git_dirty": false,
+  "agent_cmd": "python agent/analyst.py",
+  "responses_dir": null,
+  "timeout": 900.0,
+  "n_questions": 12,
+  "rates": {
+    "dev": {
+      "questions": 12,
+      "answerable": 10,
+      "correct": 12,
+      "accuracy": 1.0,
+      "wrong_confident_rate": 0.0,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.0
+    },
+    "all": {
+      "questions": 12,
+      "answerable": 10,
+      "correct": 12,
+      "accuracy": 1.0,
+      "wrong_confident_rate": 0.0,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.0
+    }
+  },
+  "usage": {
+    "input_tokens": 422344,
+    "output_tokens": 7637,
+    "tool_calls": 12
+  }
+}

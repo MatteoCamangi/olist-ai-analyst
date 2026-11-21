@@ -199,6 +199,8 @@ Note on delivery metrics: for delivery time and late deliveries, "delivered" mea
 - Common mistakes: ranking sellers with very few reviews; joining raw reviews (duplicates orders); ignoring ties
 - Caveats: in a multi-seller order the same review counts for every seller in it. The ten best sellers all average 5.0, so ties exist
 - Validated value (confirmed): 1,761 qualifying sellers. Top 10 by rating all 5.0 with 33, 12, 9, 8, 8, 8, 8, 7, 7, 7 reviewed orders. Reproduced on marts
+Rounding is for display only. Thresholds, rankings and comparisons use the unrounded value
+(a seller averaging 4.797 does not meet a threshold of 4.8, even though it displays as 4.80).
 
 ### Seller late delivery rate
 - Definition: per seller, the share of their delivered orders with a delivery date whose delivery fell on a later calendar day than the estimated delivery date
