@@ -5,10 +5,21 @@ Usage (from the repo root):
 
 Reads one JSON object {"question", "answer_schema"} from stdin and prints the full response on stdout: the analysis in
 prose, then the JSON envelope of evals/ANSWER_FORMAT.md as the last ```json block. At exit it always writes one line
-to stderr:  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n}
+to stderr:  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n, "model": s, "docs": s, "brief": s}
+(model, docs and brief are null when the configuration below is invalid or was not read).
+
+Configuration (ablations), from environment variables; unset or empty means the default, which is the v1 agent:
+    ANALYST_MODEL   model id, must start with "claude-" (default claude-sonnet-5-5)
+    ANALYST_DOCS    full (default): brief, docs/metrics.md, marts yml docs, ANSWER_FORMAT.md
+                    schema: as full without docs/metrics.md (the marts yml docs, doc() blocks resolved, stay)
+                    none: no documents; only the brief and ANSWER_FORMAT.md (tables via information_schema)
+    ANALYST_BRIEF   full (default) | minimal: drops the rules between the rules markers of agent/BRIEF.md
+                    (role, tool, limits and the answer-format instruction stay). In full mode only the marker
+                    lines are removed.
 
 Exit codes: 0 answered (the envelope may still say cannot_answer), 1 failure (API error after retries, refusal,
-output limit hit (stop_reason max_tokens) or empty answer), 2 bad input or missing OLIST_AGENT_API_KEY.
+output limit hit (stop_reason max_tokens) or empty answer), 2 bad input, bad configuration or missing
+OLIST_AGENT_API_KEY.
 
 Every model turn is streamed (client.messages.stream) and read with get_final_message(): the SDK requires
 streaming for a max_tokens this large. Adaptive thinking (the model default, not set here) counts against the
@@ -50,6 +61,11 @@ BACKOFF_SECONDS = 2.0
 API_TIMEOUT_SECONDS = 240
 KEY_ENV = "OLIST_AGENT_API_KEY"
 TRACE_ENV = "AGENT_TRACE_FILE"
+MODEL_ENV, DOCS_ENV, BRIEF_ENV = "ANALYST_MODEL", "ANALYST_DOCS", "ANALYST_BRIEF"
+DOCS_MODES = ("full", "schema", "none")
+BRIEF_MODES = ("full", "minimal")
+RULES_START, RULES_END = "<!-- rules:start -->", "<!-- rules:end -->"  # whole lines in agent/BRIEF.md
+_MODEL_ID = re.compile(r"claude-\S+")
 
 # Every file the agent's prompt is built from. Nothing else is ever read for the model.
 BRIEF = "agent/BRIEF.md"
@@ -132,17 +148,59 @@ def marts_docs():
     return "\n".join(out)
 
 
-def build_system_prompt():
-    return "\n\n".join([
+def read_config(env):
+    """{"model", "docs", "brief"} from the environment; unset or empty means the default. Raises ValueError."""
+    model = env.get(MODEL_ENV) or MODEL
+    docs = env.get(DOCS_ENV) or "full"
+    brief = env.get(BRIEF_ENV) or "full"
+    if not _MODEL_ID.fullmatch(model):
+        raise ValueError(f"{MODEL_ENV} must be a model id starting with claude-, got {model!r}")
+    if docs not in DOCS_MODES:
+        raise ValueError(f"{DOCS_ENV} must be one of {', '.join(DOCS_MODES)}, got {docs!r}")
+    if brief not in BRIEF_MODES:
+        raise ValueError(f"{BRIEF_ENV} must be one of {', '.join(BRIEF_MODES)}, got {brief!r}")
+    return {"model": model, "docs": docs, "brief": brief}
+
+
+def brief_text(mode="full"):
+    """agent/BRIEF.md without its marker lines; minimal also drops every line between a start and an end marker."""
+    if mode not in BRIEF_MODES:
+        raise ValueError(f"unknown brief mode {mode!r}")
+    kept, inside, seen = [], False, 0
+    for line in read_allowed(BRIEF).splitlines(keepends=True):
+        marker = line.strip()
+        if marker == RULES_START:
+            if inside:
+                raise ValueError("nested rules:start marker in BRIEF.md")
+            inside, seen = True, seen + 1
+        elif marker == RULES_END:
+            if not inside:
+                raise ValueError("rules:end marker without rules:start in BRIEF.md")
+            inside = False
+        elif not inside or mode == "full":
+            kept.append(line)
+    if inside or not seen:
+        raise ValueError("BRIEF.md needs balanced rules markers")
+    return "".join(kept)
+
+
+def build_system_prompt(docs="full", brief="full"):
+    if docs not in DOCS_MODES:
+        raise ValueError(f"unknown docs mode {docs!r}")
+    sections = [
         "You are the Olist analyst agent described in the brief below. You answer one question per conversation. "
         "Use the run_sql tool to query the warehouse; every number in your answer must come from a query you ran. "
         "Your final message is the answer itself: a few sentences for a human reader, then the JSON envelope as the "
         "last ```json block, exactly as in the answer format at the end of this prompt.",
-        "# Brief\n\n" + read_allowed(BRIEF).strip(),
-        "# Metric definitions (docs/metrics.md)\n\n" + read_allowed(METRICS).strip(),
-        "# Marts (the only tables you can query; unqualified names resolve to the marts schema)\n\n" + marts_docs().strip(),
-        "# Answer format (evals/ANSWER_FORMAT.md)\n\n" + read_allowed(ANSWER_FORMAT).strip(),
-    ])
+        "# Brief\n\n" + brief_text(brief).strip(),
+    ]
+    if docs == "full":
+        sections.append("# Metric definitions (docs/metrics.md)\n\n" + read_allowed(METRICS).strip())
+    if docs in ("full", "schema"):
+        sections.append("# Marts (the only tables you can query; unqualified names resolve to the marts schema)\n\n"
+                        + marts_docs().strip())
+    sections.append("# Answer format (evals/ANSWER_FORMAT.md)\n\n" + read_allowed(ANSWER_FORMAT).strip())
+    return "\n\n".join(sections)
 
 
 def build_user_message(payload):
@@ -201,7 +259,7 @@ def _add_usage(usage, u):
     usage["output_tokens"] += getattr(u, "output_tokens", 0) or 0
 
 
-def run(payload, client, sandbox, usage, sleep=time.sleep, system=None, trace=None):
+def run(payload, client, sandbox, usage, sleep=time.sleep, system=None, trace=None, model=MODEL):
     """Return the final response text. Updates usage in place, so it is complete even when this raises."""
     trace = trace or NoTrace()
     system = system if system is not None else build_system_prompt()
@@ -209,7 +267,7 @@ def run(payload, client, sandbox, usage, sleep=time.sleep, system=None, trace=No
     tool_choice = {"type": "auto"}
     for turn in range(1, MAX_TURNS + 1):
         response = call_with_retry(
-            client, sleep, model=MODEL, max_tokens=MAX_TOKENS, system=system, messages=messages,
+            client, sleep, model=model, max_tokens=MAX_TOKENS, system=system, messages=messages,
             tools=[sandbox_mod.TOOL], tool_choice=tool_choice, cache_control={"type": "ephemeral"})
         _add_usage(usage, response.usage)
         messages.append({"role": "assistant", "content": response.content})
@@ -269,6 +327,7 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
     stdin, stdout, stderr = stdin or sys.stdin, stdout or sys.stdout, stderr or sys.stderr
     env = os.environ if env is None else env
     usage = {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0}
+    config = dict.fromkeys(("model", "docs", "brief"))  # all null until read
     sandbox, trace = None, NoTrace()
     try:
         try:
@@ -277,6 +336,11 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
                 raise ValueError("need an object with question and answer_schema")
         except ValueError as exc:
             print(f"analyst: bad input: {exc}", file=stderr)
+            return 2
+        try:
+            config = read_config(env)
+        except ValueError as exc:
+            print(f"analyst: bad config: {exc}", file=stderr)
             return 2
         api_key = env.get(KEY_ENV)
         if not api_key:
@@ -291,7 +355,9 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
         try:
             client = (client_factory or _default_client)(api_key)
             sandbox = (sandbox_factory or sandbox_mod.Sandbox)()
-            text = run(payload, client, sandbox, usage, sleep=sleep, trace=trace)
+            system = build_system_prompt(config["docs"], config["brief"])
+            text = run(payload, client, sandbox, usage, sleep=sleep, system=system, trace=trace,
+                       model=config["model"])
         except AgentError as exc:
             print(f"analyst: {exc}", file=stderr)
             trace.event("error", message=str(exc))
@@ -307,7 +373,7 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
         if sandbox is not None:
             sandbox.close()
         trace.close()
-        print("USAGE " + json.dumps(usage), file=stderr)
+        print("USAGE " + json.dumps({**usage, **config}), file=stderr)
         stderr.flush()
 
 

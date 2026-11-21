@@ -29,6 +29,17 @@ q = json.loads(sys.stdin.read())
 print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
 print('USAGE {"input_tokens": 1000, "output_tokens": 200, "tool_calls": 3}', file=sys.stderr)
 """,
+    "configured": """
+import json, sys
+from pathlib import Path
+q = json.loads(sys.stdin.read())
+print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
+counter = Path(__file__).parent / "configured.count"
+n = int(counter.read_text()) if counter.exists() else 0
+counter.write_text(str(n + 1))
+config = {"model": "claude-first-x" if n == 0 else "claude-later-x", "docs": "schema", "brief": "minimal"}
+print("USAGE " + json.dumps({"input_tokens": 10, "output_tokens": 2, "tool_calls": 1, **config}), file=sys.stderr)
+""",
     "refuser": """
 import json, sys
 json.loads(sys.stdin.read())
@@ -292,6 +303,61 @@ def test_usage_null_for_responses_dir(env):
     ok(p, "responses-dir")
     summary, _ = env.latest(p)
     assert summary["usage"] is None and "usage:" not in p.stdout
+
+
+@with_env
+def test_agent_config_in_summary(env):
+    p = env.run("--split", "dev", "--label", "config", agent="configured")
+    ok(p, "configured")
+    summary, detail = env.latest(p)
+    first = {"model": "claude-first-x", "docs": "schema", "brief": "minimal"}
+    assert summary["agent_config"] == first, summary["agent_config"]  # the first question's, later ones ignored
+    assert detail["agent_config"] == first
+    assert all("agent_config" not in q and "usage" not in q for q in detail["questions"]), "per-question config"
+    assert "claude-later-x" not in json.dumps(summary)  # (detail keeps each raw stderr_tail, as before)
+    assert "agent_config: model claude-first-x  docs schema  brief minimal" in p.stdout
+    assert summary["usage"]["tool_calls"] == sum(e["split"] == "dev" for e in Q.values())
+
+    p = env.run("--split", "dev", "--label", "noconfig", "--questions", "q001", agent="perfect")  # counts only
+    ok(p, "perfect")
+    summary, _ = env.latest(p)
+    assert summary["agent_config"] is None and "agent_config:" not in p.stdout
+
+    rdir = env.dir / "responses"
+    rdir.mkdir()
+    p = env.run("--split", "dev", "--label", "files", "--responses-dir", str(rdir))
+    ok(p, "responses-dir")
+    summary, _ = env.latest(p)
+    assert summary["agent_config"] is None
+
+
+SUMMARY_KEYS = {"timestamp", "split", "label", "git_sha", "git_dirty", "agent_cmd", "responses_dir", "timeout",
+                "n_questions", "rates", "usage", "agent_config"}
+RATE_KEYS = {"questions", "answerable", "correct", "accuracy", "wrong_confident_rate", "false_refusal_rate",
+             "incomplete_refusal_rate", "format_error_rate"}
+
+
+@with_env
+def test_summaries_hold_no_per_question_data(env):
+    for split, agent in (("dev", "configured"), ("hidden", "configured"), ("all", "configured"), ("dev", "crasher"),
+                         ("all", "perfect")):
+        extra = ["--confirm-hidden"] if split != "dev" else []
+        ok(env.run("--split", split, "--label", f"{agent}-{split}", *extra, agent=agent), f"{agent} {split}")
+    paths = env.summaries()
+    assert len(paths) == 5, paths
+    for path in paths:
+        summary = json.loads(path.read_text())
+        expected = SUMMARY_KEYS | ({"earlier_hidden_runs"} if summary["split"] != "dev" else set())
+        assert set(summary) == expected, (path.name, set(summary) ^ expected)
+        assert not ID.search(path.read_text()), f"{path.name} holds question ids"
+        for split, rates in summary["rates"].items():
+            assert set(rates) == RATE_KEYS and all(isinstance(v, (int, float)) for v in rates.values()), split
+        assert set(summary["usage"]) == {"input_tokens", "output_tokens", "tool_calls"}
+        assert all(type(v) is int for v in summary["usage"].values())
+        config = summary["agent_config"]
+        assert config is None or (set(config) == {"model", "docs", "brief"}
+                                  and all(isinstance(v, str) for v in config.values())), config
+        assert_no_leak(summary, path.name)
 
 
 @with_env

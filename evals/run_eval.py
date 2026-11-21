@@ -19,8 +19,10 @@ Trace: each agent call gets its own temp file in AGENT_TRACE_FILE. The JSON line
 stored as "trace" in the detail file only (null with --responses-dir), never in the summary or on the console.
 Inspect one dev question with  python evals/show_detail.py <detail file> <id>.
 
-Usage: the agent may write one stderr line  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n}.
+Usage: the agent may write one stderr line  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n, ...}.
 The summary keeps the totals over all questions (failed calls included), never per-question figures.
+Agent configuration: if that line also holds "model", "docs" and "brief" (strings), the summary stores them once as
+agent_config, read from the first question only (null when absent, and with --responses-dir).
 """
 import argparse
 import datetime as dt
@@ -42,6 +44,8 @@ RUNS = ROOT / "evals" / "runs"
 PAYLOAD_FIELDS = ("question", "answer_schema")  # the only entry fields the agent ever sees
 TRACE_ENV = "AGENT_TRACE_FILE"
 USAGE_KEYS = ("input_tokens", "output_tokens", "tool_calls")
+CONFIG_KEYS = ("model", "docs", "brief")
+PER_RUN_ONLY = ("usage", "agent_config")  # kept per question in memory, stored only as one run-level value
 USAGE_LINE = re.compile(r"^USAGE (\{.*\})\s*$", re.MULTILINE)
 RATE_KEYS = ("questions", "answerable", "correct", "accuracy", "wrong_confident_rate", "false_refusal_rate",
              "incomplete_refusal_rate", "format_error_rate")
@@ -109,6 +113,18 @@ def parse_usage(stderr):
     return None
 
 
+def parse_agent_config(stderr):
+    """model, docs and brief from the last USAGE line of the agent's stderr that holds all three, or None."""
+    for raw in reversed(USAGE_LINE.findall(stderr or "")):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and all(isinstance(data.get(k), str) and data[k] for k in CONFIG_KEYS):
+            return {k: data[k] for k in CONFIG_KEYS}
+    return None
+
+
 def usage_totals(items):
     totals = dict.fromkeys(USAGE_KEYS, 0)
     for item in items:
@@ -149,7 +165,8 @@ def run_one(args, entry):
         if len(exc.args) > 2:
             trace = exc.args[2]
     return {"result": result, "response": response, "trace": trace, "stderr_tail": (stderr or "")[-2000:],
-            "seconds": round(time.monotonic() - start, 2), "usage": parse_usage(stderr)}
+            "seconds": round(time.monotonic() - start, 2), "usage": parse_usage(stderr),
+            "agent_config": parse_agent_config(stderr)}
 
 
 def git_info():
@@ -245,11 +262,12 @@ def main(argv=None):
                "agent_cmd": args.agent_cmd,
                "responses_dir": str(args.responses_dir) if args.responses_dir else None,
                "timeout": args.timeout, "n_questions": len(entries), "rates": rates_only(full),
-               "usage": None if args.responses_dir else usage_totals(items)}
+               "usage": None if args.responses_dir else usage_totals(items),
+               "agent_config": items[0]["agent_config"] if items else None}
     if args.split != "dev":
         summary["earlier_hidden_runs"] = earlier_hidden_runs(runs_dir)
     detail = {**summary, "summary": full,
-              "questions": [{"id": i["result"]["id"], **{k: v for k, v in i.items() if k != "usage"}}
+              "questions": [{"id": i["result"]["id"], **{k: v for k, v in i.items() if k not in PER_RUN_ONLY}}
                             for i in items]}
 
     (runs_dir / "detail").mkdir(parents=True, exist_ok=True)
@@ -264,6 +282,9 @@ def main(argv=None):
         u = summary["usage"]
         print(f"usage: input_tokens {u['input_tokens']}  output_tokens {u['output_tokens']}  "
               f"tool_calls {u['tool_calls']}")
+    if summary["agent_config"] is not None:
+        c = summary["agent_config"]
+        print(f"agent_config: model {c['model']}  docs {c['docs']}  brief {c['brief']}")
     if show_ids:
         manual = full["all"]["manual_review"]
         print(f"manual_review: {', '.join(manual) if manual else 'none'}")

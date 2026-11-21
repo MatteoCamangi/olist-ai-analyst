@@ -118,8 +118,28 @@ For each question the runner starts `--agent-cmd` in a fresh process, writes one
 graded `format_error` with reason `agent failed: ...`. `--questions` takes a subset of dev questions only.
 
 Each run writes `evals/runs/<UTC timestamp>_<split>_<label>.json` (timestamp, split, label, git sha and dirty flag,
-agent command, number of questions, counts and rates per split) and `evals/runs/detail/<same name>.json` (per-question
-results and raw responses). Commit the summaries; the detail folder is gitignored.
+agent command, number of questions, counts and rates per split, usage totals and `agent_config`) and
+`evals/runs/detail/<same name>.json` (per-question results and raw responses). Commit the summaries; the detail
+folder is gitignored.
+
+**Agent configuration (ablations).** `agent/analyst.py` reads three environment variables, so the same code can run
+with parts removed. Unset or empty means the default, which is the v1 agent (the same prompt, byte for byte, and model):
+
+| Variable | Values | Effect |
+|---|---|---|
+| `ANALYST_MODEL` | model id starting with `claude-` (default `claude-sonnet-5-5`) | the model called |
+| `ANALYST_DOCS` | `full` (default), `schema`, `none` | `full`: docs/metrics.md and the marts yml docs. `schema`: the marts yml model and column descriptions only (doc() blocks resolved), no docs/metrics.md. `none`: no documents; the agent finds tables through information_schema |
+| `ANALYST_BRIEF` | `full` (default), `minimal` | `minimal` drops the rules between the `<!-- rules:start -->` / `<!-- rules:end -->` markers of agent/BRIEF.md (section 4); role, tool, limits and the answer-format instruction stay |
+
+evals/ANSWER_FORMAT.md is in the prompt in every mode, and the agent's allowed-documents list does not change. An
+invalid value exits 2 before any API call. The agent writes the configuration in its USAGE line
+(`"model"`, `"docs"`, `"brief"`); the runner reads it from the first question and stores one `agent_config` object in
+the summary (null with `--responses-dir` or an agent that does not report it). Label runs after the ablation:
+
+```
+ANALYST_DOCS=schema python evals/run_eval.py --split dev --label docs-schema --agent-cmd "python agent/analyst.py"
+ANALYST_DOCS=none ANALYST_BRIEF=minimal python evals/run_eval.py --split dev --label bare --agent-cmd "python agent/analyst.py"
+```
 
 **Hidden runs.** `--split hidden` and `--split all` are refused without `--confirm-hidden`. For these splits the
 console and the summary hold rates only: no question ids, outcomes or reasons, so failures cannot be tuned against.

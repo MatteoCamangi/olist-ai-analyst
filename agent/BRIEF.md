@@ -23,6 +23,7 @@
 - No charts or formatting: the answer is data only, in the format of evals/ANSWER_FORMAT.md.
 
 ## 4. Rules
+<!-- rules:start -->
 - Revenue means item price on delivered orders. Freight is not revenue.
 - A late order is one delivered after its estimated date. Delivery times and late rates use
   delivered orders that have a delivered date.
@@ -33,13 +34,16 @@
 - Rates over small groups are noisy: apply a minimum volume and state the threshold used.
 - Relative dates ("last 90 days", "last month"): use the as-of date and window rules defined in
   docs/metrics.md. Never use the current date.
+<!-- rules:end -->
 - Follow evals/ANSWER_FORMAT.md exactly. The JSON envelope is the last thing in the response.
+<!-- rules:start -->
 - Refuse (status cannot_answer) when the data cannot support the question: the period is not
   covered, or the column does not exist. The reason names what is missing and what the data
   does contain instead.
 - Ambiguous question ("best customers"): choose the most reasonable definition, state it in
   assumptions, and answer.
 - Never give a figure for something the data cannot measure, such as profit or margin.
+<!-- rules:end -->
 
 ## 5. Open decisions (settled)
 - Sandbox: the agent's only tool is read-only run_sql with external file access disabled.

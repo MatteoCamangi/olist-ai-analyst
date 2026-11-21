@@ -208,10 +208,17 @@ def run_main(client, env=None, payload=PAYLOAD, sleeps=None):
     return code, out.getvalue(), err.getvalue()
 
 
-def usage_line(err):
+CONFIG_KEYS = ("model", "docs", "brief")
+DEFAULT_CONFIG = {"model": "claude-sonnet-5-5", "docs": "full", "brief": "full"}
+
+
+def usage_line(err, config=False):
+    """The counts of the single USAGE line (it must also hold the config keys); with config=True, the config."""
     lines = [ln for ln in err.splitlines() if ln.startswith("USAGE ")]
     assert len(lines) == 1 and err.rstrip().endswith(lines[0]), f"USAGE line: {err!r}"
-    return json.loads(lines[0][len("USAGE "):])
+    data = json.loads(lines[0][len("USAGE "):])
+    assert set(data) == {"input_tokens", "output_tokens", "tool_calls", *CONFIG_KEYS}, data
+    return {k: data[k] for k in (CONFIG_KEYS if config else ("input_tokens", "output_tokens", "tool_calls"))}
 
 
 def test_one_tool_call_then_answer():
@@ -510,6 +517,141 @@ def test_system_prompt():
     assert "{{" not in system and "doc(" not in system and "{% docs" not in system
     assert "The JSON envelope" in system and "Revenue means item price" in system
     assert system == analyst.build_system_prompt(), "prompt must be deterministic for caching"
+
+
+def old_build_system_prompt():
+    """A literal copy of the prompt formula before ablations; the brief is BRIEF.md without its marker lines."""
+    brief = "".join(ln for ln in (ROOT / analyst.BRIEF).read_text().splitlines(keepends=True)
+                    if ln.strip() not in (analyst.RULES_START, analyst.RULES_END))
+    return "\n\n".join([
+        "You are the Olist analyst agent described in the brief below. You answer one question per conversation. "
+        "Use the run_sql tool to query the warehouse; every number in your answer must come from a query you ran. "
+        "Your final message is the answer itself: a few sentences for a human reader, then the JSON envelope as the "
+        "last ```json block, exactly as in the answer format at the end of this prompt.",
+        "# Brief\n\n" + brief.strip(),
+        "# Metric definitions (docs/metrics.md)\n\n" + (ROOT / analyst.METRICS).read_text().strip(),
+        "# Marts (the only tables you can query; unqualified names resolve to the marts schema)\n\n"
+        + analyst.marts_docs().strip(),
+        "# Answer format (evals/ANSWER_FORMAT.md)\n\n" + (ROOT / analyst.ANSWER_FORMAT).read_text().strip(),
+    ])
+
+
+def answer_once():
+    return FakeClient(lambda i, kw: SimpleNamespace(stop_reason="end_turn", usage=usage(), content=[text_block(ANSWER)]))
+
+
+def metrics_lines():
+    lines = [ln.strip() for ln in (ROOT / analyst.METRICS).read_text().splitlines() if len(ln.strip()) >= 30]
+    assert len(lines) > 50, len(lines)
+    return lines
+
+
+def marts_doc_texts():
+    """Model headings and every model or column description of the marts docs, doc() blocks resolved."""
+    texts = []
+    for ln in analyst.marts_docs().splitlines():
+        ln = ln.strip()
+        if ln.startswith("- `"):
+            ln = ln.split("`: ", 1)[1]
+        if len(ln) >= 20:
+            texts.append(ln)
+    assert len(texts) > 50, len(texts)
+    return texts
+
+
+def answer_format_text():
+    return (ROOT / analyst.ANSWER_FORMAT).read_text().strip()
+
+
+def test_default_prompt_unchanged():
+    expected = old_build_system_prompt()
+    assert analyst.build_system_prompt() == expected
+    assert analyst.build_system_prompt("full", "full") == expected
+    assert analyst.RULES_START not in expected and analyst.RULES_END not in expected and "<!--" not in expected
+    for env in ({}, {analyst.MODEL_ENV: "", analyst.DOCS_ENV: "", analyst.BRIEF_ENV: ""}):
+        client = answer_once()
+        code, _, err = run_main(client, env={analyst.KEY_ENV: "sk-test-secret-123", **env})
+        assert code == 0, err
+        assert client.calls[0]["system"] == expected, "main sends a different default prompt"
+        assert client.calls[0]["model"] == "claude-sonnet-5-5"
+        assert usage_line(err, config=True) == DEFAULT_CONFIG
+
+
+def test_schema_mode_has_no_metrics_text():
+    system = analyst.build_system_prompt("schema")
+    hits = [ln for ln in metrics_lines() if ln in system]
+    assert not hits, hits[:3]
+    assert "# Metric definitions" not in system
+    missing = [t for t in marts_doc_texts() if t not in system]
+    assert not missing, missing[:3]
+    for mart in ("fct_orders", "fct_order_items", "fct_order_sellers", "dim_customers", "dim_products"):
+        assert f"### marts.{mart}" in system, mart
+    assert "{{" not in system and "doc(" not in system
+    assert answer_format_text() in system and "Revenue means item price" in system
+
+
+def test_none_mode_has_no_document_text():
+    system = analyst.build_system_prompt("none")
+    hits = [ln for ln in metrics_lines() if ln in system]
+    assert not hits, hits[:3]
+    hits = [t for t in marts_doc_texts() if t in system]
+    assert not hits, hits[:3]
+    for body in analyst.doc_blocks().values():
+        assert body not in system, body[:80]
+    assert "### marts." not in system and "# Marts" not in system and "# Metric definitions" not in system
+    assert answer_format_text() in system and "# Brief" in system
+    assert system == "\n\n".join([system.split("\n\n# Brief")[0], "# Brief\n\n" + analyst.brief_text().strip(),
+                                   "# Answer format (evals/ANSWER_FORMAT.md)\n\n" + answer_format_text()])
+
+
+def test_minimal_brief_drops_rules():
+    full, minimal = analyst.brief_text("full"), analyst.brief_text("minimal")
+    rules = full.split("## 4. Rules\n", 1)[1].split("\n## 5.", 1)[0]
+    kept = "- Follow evals/ANSWER_FORMAT.md exactly. The JSON envelope is the last thing in the response."
+    dropped = [ln for ln in rules.splitlines() if ln.strip() and ln != kept]
+    assert len(dropped) >= 10, dropped
+    for docs in analyst.DOCS_MODES:
+        system = analyst.build_system_prompt(docs, "minimal")
+        brief = system.split("# Brief\n\n", 1)[1].split("\n\n# ", 1)[0]
+        assert brief == minimal.strip()
+        hits = [ln for ln in dropped if ln in brief]
+        assert not hits, hits
+        assert kept in brief and "<!--" not in brief
+        for heading in ("## 1. Role", "## 2. What it knows", "## 3. What it can do", "## 4. Rules", "## 5."):
+            assert heading in brief, heading
+        assert "One tool for v1: run_sql" in brief and "Limits: 10 queries per question" in brief
+        assert "in the format of evals/ANSWER_FORMAT.md" in brief
+    assert "Revenue means item price" not in minimal and "Revenue means item price" in full
+
+
+def test_env_config_reaches_api():
+    def script(i, kw):
+        if i == 0:
+            return SimpleNamespace(stop_reason="tool_use", usage=usage(),
+                                   content=[tool_block(1, "SELECT count(*) AS n FROM fct_orders")])
+        return SimpleNamespace(stop_reason="end_turn", usage=usage(), content=[text_block(ANSWER)])
+    client = FakeClient(script)
+    env = {analyst.KEY_ENV: "sk-test-secret-123", analyst.MODEL_ENV: "claude-test-x",
+           analyst.DOCS_ENV: "none", analyst.BRIEF_ENV: "minimal"}
+    code, _, err = run_main(client, env=env)
+    assert code == 0, err
+    assert [c["model"] for c in client.calls] == ["claude-test-x"] * 2
+    assert all(c["system"] == analyst.build_system_prompt("none", "minimal") for c in client.calls)
+    assert usage_line(err, config=True) == {"model": "claude-test-x", "docs": "none", "brief": "minimal"}
+    assert usage_line(err) == {"input_tokens": 200, "output_tokens": 20, "tool_calls": 1}
+
+
+def test_invalid_config_exits_2():
+    bad = [{analyst.MODEL_ENV: "gpt-4"}, {analyst.MODEL_ENV: "claude-"}, {analyst.MODEL_ENV: "claude sonnet"},
+           {analyst.MODEL_ENV: "my-claude-model"}, {analyst.DOCS_ENV: "bogus"}, {analyst.DOCS_ENV: "FULL"},
+           {analyst.BRIEF_ENV: "bogus"}]
+    for env in bad:
+        client = FakeClient(None)
+        code, out, err = run_main(client, env={analyst.KEY_ENV: "sk-test-secret-123", **env})
+        assert code == 2 and not client.calls and not out, (env, code, err)
+        assert "bad config" in err and next(iter(env)) in err, err
+        assert usage_line(err, config=True) == dict.fromkeys(CONFIG_KEYS), err
+        assert usage_line(err) == {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0}
 
 
 def test_user_message_holds_question_and_schema_only():
