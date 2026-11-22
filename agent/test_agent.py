@@ -732,6 +732,8 @@ def test_brief_markers_validated():
         "rules end dropped": good.replace(analyst.RULES_END + "\n", "", 1),
         "marts end dropped": good.replace(analyst.MARTS_END + "\n", "", 1),
         "marts start dropped": good.replace(analyst.MARTS_START + "\n", "", 1),
+        "one marts block fewer in section 2": good.replace(analyst.MARTS_START + "\n", "", 1).replace(
+            analyst.MARTS_END + "\n", "", 1),
     }
     try:
         for label, text in broken.items():
@@ -872,6 +874,107 @@ def test_raw_scope_config_rules():
         assert code == 2 and not client.calls and not out, (env, err)
         assert "bad config" in err and analyst.SCOPE_ENV in err, err
         assert usage_line(err, config=True) == dict.fromkeys(CONFIG_KEYS)
+
+
+# -- model SQL and metadata --------------------------------------------------------------------------------
+
+MODEL_SQL_QUERIES = (
+    "SELECT table_name, view_definition FROM information_schema.views",
+    'SELECT * FROM "INFORMATION_SCHEMA"."VIEWS"',
+    "SELECT * FROM Information_Schema.Views WHERE table_schema = 'intermediate'",
+    "SELECT * FROM warehouse.information_schema.views",
+    "WITH v AS (SELECT * FROM information_schema.views) SELECT view_definition FROM v",
+    "SELECT * FROM (SELECT view_definition FROM information_schema.views) x",
+    "SELECT t.table_name FROM information_schema.tables t JOIN information_schema.views v USING (table_name)",
+    "SELECT sql FROM duckdb_views()",
+    "SELECT sql FROM main.duckdb_views()",
+    "SELECT * FROM duckdb_views",
+    "SELECT sql FROM duckdb_tables()",
+    "SELECT sql FROM sqlite_master",
+    "SELECT sql FROM sqlite_schema",
+    "SELECT sql FROM main.sqlite_master",
+    "SELECT * FROM sqlite_temp_master",
+    "SELECT definition FROM pg_catalog.pg_views",
+    "SELECT * FROM pg_views",
+)
+
+
+def scoped(scope):
+    return sandbox.Sandbox(timeout=5, scope=scope)
+
+
+def test_model_sql_rejected_both_scopes():
+    for scope in ("marts", "raw"):
+        sb_ = scoped(scope)
+        try:
+            for sql in MODEL_SQL_QUERIES:
+                out = sb_.run_sql(sql)
+                assert out == "ERROR: The SQL of the models is not readable.", (scope, sql, out[:200])
+        finally:
+            sb_.close()
+    assert "CREATE VIEW" not in "".join(sb().run_sql(q) for q in MODEL_SQL_QUERIES).upper()
+
+
+def test_information_schema_allowlist():
+    for scope in ("marts", "raw"):
+        sb_ = scoped(scope)
+        try:
+            for sql in ("SELECT table_schema, table_name FROM information_schema.tables",
+                        "SELECT table_name, column_name, data_type FROM information_schema.columns"):
+                assert not is_error(sb_.run_sql(sql)), (scope, sql)
+            for name in ("schemata", "table_constraints", "key_column_usage", "check_constraints", "character_sets"):
+                out = sb_.run_sql(f"SELECT * FROM information_schema.{name}")
+                assert is_error(out) and "information_schema.tables and information_schema.columns" in out, (scope, out)
+        finally:
+            sb_.close()
+
+
+def test_raw_scope_metadata_filtered():
+    raw, marts = scoped("raw"), scoped("marts")
+    try:
+        assert raw.run_sql("SELECT DISTINCT table_schema FROM information_schema.tables") == \
+            "table_schema\nraw\n(1 row)"
+        assert raw.run_sql("SELECT count(*) AS n FROM information_schema.tables") == "n\n9\n(1 row)"
+        assert raw.run_sql("SELECT DISTINCT table_schema FROM information_schema.columns") == \
+            "table_schema\nraw\n(1 row)"
+        hidden = ("SELECT count(*) AS n FROM information_schema.tables WHERE table_name = 'fct_orders'",
+                  "SELECT count(*) AS n FROM information_schema.columns WHERE column_name = 'is_late'",
+                  "SELECT count(*) AS n FROM information_schema.tables t WHERE t.table_schema IN "
+                  "('marts', 'staging', 'intermediate') OR 1 = 0",
+                  "WITH x AS (SELECT * FROM information_schema.tables) SELECT count(*) AS n FROM x "
+                  "WHERE table_schema <> 'raw'",
+                  "SELECT count(*) AS n FROM information_schema.columns c JOIN information_schema.tables t "
+                  "ON c.table_name = t.table_name WHERE t.table_schema = 'marts'",
+                  "SELECT count(*) AS n FROM information_schema.columns WHERE table_name IN "
+                  "(SELECT table_name FROM information_schema.tables WHERE table_schema = 'staging')")
+        for sql in hidden:
+            assert raw.run_sql(sql) == "n\n0\n(1 row)", (sql, raw.run_sql(sql))
+        assert raw.run_sql("SELECT count(*) AS n FROM information_schema.tables t WHERE 1 = 1 OR "
+                           "t.table_schema = 'marts'") == "n\n9\n(1 row)"
+        out = raw.run_sql("SELECT information_schema.tables.table_name FROM information_schema.tables")
+        assert is_error(out), out  # a fully qualified column cannot reach the unfiltered view: fails closed
+        error, run = raw.prepare("SELECT count(*) AS n FROM orders")
+        assert error is None and run == "SELECT count(*) AS n FROM orders"  # data queries run as sent
+        marts_sql = "SELECT table_schema, count(*) AS n FROM information_schema.tables GROUP BY 1 ORDER BY 1"
+        assert marts.prepare(marts_sql) == (None, marts_sql)  # marts scope: verbatim, all schemas visible
+        assert marts.run_sql(marts_sql) == \
+            "table_schema\tn\nintermediate\t3\nmarts\t5\nraw\t9\nstaging\t8\n(4 rows)"
+    finally:
+        raw.close()
+        marts.close()
+
+
+def test_raw_brief_consistent():
+    marts_sentence = "allowed list), the raw tables, or the SQL of the dbt models."
+    raw_line = analyst.RAW_BRIEF_LINES[1]
+    for brief, system in raw_prompts().items():
+        assert "the raw tables" not in system and marts_sentence not in system, brief
+        section_2 = system.split("## 2. What it knows\n", 1)[1].split("\n## 3.", 1)[0].splitlines()
+        assert section_2.count(raw_line) == 1 and system.count(raw_line) == 1, section_2
+        assert "Cannot see anything under evals/" in raw_line and "SQL of the dbt models" in raw_line
+        assert analyst.RAW_SCOPE_LINE in system  # can query raw, and nothing says it cannot
+    for key, system in all_prompts().items():
+        assert marts_sentence in system and raw_line not in system and analyst.RAW_BRIEF_LINE not in system, key
 
 
 def test_user_message_holds_question_and_schema_only():

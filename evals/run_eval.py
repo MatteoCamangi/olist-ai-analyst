@@ -15,6 +15,10 @@ Outputs:
     evals/runs/detail/<UTC timestamp>_<split>_<label>.json  per-question results, responses and traces (gitignored)
 Console: per-question lines for dev only. Hidden and all print rates only.
 
+Guard: with --agent-cmd, if every question failed before reaching the model (the agent exited non-zero or printed
+nothing, and reported zero tokens or no USAGE line; timeouts excluded, since a killed agent cannot report what it
+spent), the runner prints a warning with the failure reasons, saves no summary and no detail file, and exits 3.
+
 Trace: each agent call gets its own temp file in AGENT_TRACE_FILE. The JSON lines the agent appends there are
 stored as "trace" in the detail file only (null with --responses-dir), never in the summary or on the console.
 Inspect one dev question with  python evals/show_detail.py <detail file> <id>.
@@ -45,7 +49,7 @@ PAYLOAD_FIELDS = ("question", "answer_schema")  # the only entry fields the agen
 TRACE_ENV = "AGENT_TRACE_FILE"
 USAGE_KEYS = ("input_tokens", "output_tokens", "tool_calls")
 CONFIG_KEYS = ("model", "docs", "brief", "scope")
-PER_RUN_ONLY = ("usage", "agent_config")  # kept per question in memory, stored only as one run-level value
+PER_RUN_ONLY = ("usage", "agent_config", "failed_early")  # kept per question in memory, stored only as one run-level value
 USAGE_LINE = re.compile(r"^USAGE (\{.*\})\s*$", re.MULTILINE)
 RATE_KEYS = ("questions", "answerable", "correct", "accuracy", "wrong_confident_rate", "false_refusal_rate",
              "incomplete_refusal_rate", "format_error_rate")
@@ -151,7 +155,7 @@ def failed_result(entry, reason):
 
 def run_one(args, entry):
     start = time.monotonic()
-    response, stderr, trace = None, "", None
+    response, stderr, trace, failed = None, "", None, None
     try:
         if args.responses_dir:
             response, stderr = read_response(args.responses_dir, entry)
@@ -159,14 +163,24 @@ def run_one(args, entry):
             response, stderr, trace = call_agent(args.agent_cmd, entry, args.timeout)
         result = grader.grade(entry, response)
     except AgentFailed as exc:
+        failed = exc.args[0]
         result = failed_result(entry, exc.args[0])
         if len(exc.args) > 1:
             stderr = exc.args[1] or ""
         if len(exc.args) > 2:
             trace = exc.args[2]
+    usage = parse_usage(stderr)
+    tokens = (usage["input_tokens"] + usage["output_tokens"]) if usage else 0
     return {"result": result, "response": response, "trace": trace, "stderr_tail": (stderr or "")[-2000:],
-            "seconds": round(time.monotonic() - start, 2), "usage": parse_usage(stderr),
-            "agent_config": parse_agent_config(stderr)}
+            "seconds": round(time.monotonic() - start, 2), "usage": usage,
+            "agent_config": parse_agent_config(stderr),
+            "failed_early": bool(failed) and not failed.startswith("agent failed: timeout") and tokens == 0}
+
+
+def last_message(stderr):
+    """The last stderr line that is not a USAGE line (the agent's own error message), or ''."""
+    lines = [ln for ln in (stderr or "").splitlines() if ln.strip() and not USAGE_LINE.match(ln)]
+    return lines[-1].strip()[:300] if lines else ""
 
 
 def git_info():
@@ -254,6 +268,14 @@ def main(argv=None):
         if show_ids:
             r = item["result"]
             print(f"{r['id']}  {r['outcome']:<18}  {'; '.join(r['reasons'])}".rstrip())
+    if args.agent_cmd and items and all(i["failed_early"] for i in items):
+        reasons = sorted({i["result"]["reasons"][0] for i in items})
+        print("WARNING: every question failed before reaching the model; summary not saved", file=sys.stderr)
+        print(f"failures: {'; '.join(reasons)}", file=sys.stderr)
+        message = last_message(items[0]["stderr_tail"])
+        if message:
+            print(f"agent stderr: {message}", file=sys.stderr)
+        return 3
     results = [i["result"] for i in items]
     full = grader.summarize(results)
 

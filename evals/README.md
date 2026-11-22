@@ -116,6 +116,9 @@ For each question the runner starts `--agent-cmd` in a fresh process, writes one
 `{"question": ..., "answer_schema": ...}` to its stdin and reads the response text from stdout. Nothing else from
 `questions.yaml` is passed. A crash (non-zero exit), a timeout (`--timeout`, default 300 seconds) or empty output is
 graded `format_error` with reason `agent failed: ...`. `--questions` takes a subset of dev questions only.
+If every question failed before reaching the model (non-zero exit or empty output, with zero tokens or no USAGE line;
+timeouts excluded), the runner prints a warning with the failure reasons and the agent's last stderr line, saves no
+summary or detail file and exits 3. A run where some questions succeed is saved as usual.
 
 Each run writes `evals/runs/<UTC timestamp>_<split>_<label>.json` (timestamp, split, label, git sha and dirty flag,
 agent command, number of questions, counts and rates per split, usage totals and `agent_config`) and
@@ -134,8 +137,16 @@ with parts removed. Unset or empty means the default, which is the v1 agent (the
 
 With `ANALYST_DOCS` other than `full`, the brief lines between `<!-- docs:start -->` / `<!-- docs:end -->` (the
 documents line of section 2 and the relative-dates rule) are dropped and section 2 gets a one-line replacement.
-Marker lines never reach the prompt. The raw scope does not hide metadata: information_schema still lists the marts
-tables and shows the SQL of the staging and intermediate views.
+Marker lines never reach the prompt.
+
+**Metadata and model SQL.** In both scopes the SQL of the models is not readable: information_schema.views,
+`duckdb_views()`, `duckdb_tables()` and the sqlite/pg catalog tables are rejected with "The SQL of the models is not
+readable." Of information_schema only `tables` and `columns` can be read. In the raw scope every reference to them is
+rewritten to a subquery filtered to the raw schema, so the marts, staging and intermediate tables do not appear
+(a column qualified as `information_schema.tables.<col>` then fails). **Before commit "Hide model SQL" (the one that
+added this paragraph), the SQL of the staging and intermediate views was readable through information_schema.views
+in both scopes**, so runs recorded earlier had that access, and information_schema in the raw scope listed every
+schema.
 
 evals/ANSWER_FORMAT.md is in the prompt in every mode, and the agent's allowed-documents list does not change. An
 invalid value exits 2 before any API call. The agent writes the configuration in its USAGE line

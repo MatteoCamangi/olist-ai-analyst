@@ -21,7 +21,7 @@ Configuration (ablations), from environment variables; unset or empty means the 
     ANALYST_SCOPE   marts (default) | raw: the sandbox reads the raw schema only (the source tables as loaded,
                     unqualified names resolve there) and the run_sql description says so. Requires
                     ANALYST_DOCS=none. The prompt gets RAW_SCOPE_LINE where the marts section would be, and the
-                    lines between marts markers of agent/BRIEF.md are dropped (section 2 gets RAW_BRIEF_LINE).
+                    lines between marts markers of agent/BRIEF.md are dropped (section 2 gets RAW_BRIEF_LINES).
     Marker lines never reach the prompt.
 
 Exit codes: 0 answered (the envelope may still say cannot_answer), 1 failure (API error after retries, refusal,
@@ -79,7 +79,12 @@ DOCS_REPLACEMENT = {  # takes the place of the section 2 docs block when the doc
     "none": "- You have no documents; discover tables and columns with information_schema.",
 }
 MARTS_START, MARTS_END = "<!-- marts:start -->", "<!-- marts:end -->"  # lines specific to the marts
-RAW_BRIEF_LINE = "- Queries the raw schema only: the source tables as loaded."  # replaces the section 2 marts block
+RAW_BRIEF_LINE = "- Queries the raw schema only: the source tables as loaded."
+RAW_BRIEF_LINES = (  # in the raw scope, the n-th marts block of section 2 is replaced by the n-th line
+    RAW_BRIEF_LINE,
+    "- Cannot see anything under evals/ (except evals/ANSWER_FORMAT.md, loaded by the agent's code from its allowed "
+    "list) or the SQL of the dbt models.",
+)
 RAW_SCOPE_LINE = "You can query the raw source tables (schema raw); discover them with information_schema."
 _MODEL_ID = re.compile(r"claude-\S+")
 
@@ -188,7 +193,7 @@ def brief_text(mode="full", docs="full", scope="marts"):
 
     minimal drops every line inside a rules block. A docs mode other than full drops every line inside a docs block;
     the docs block of section 2 is replaced by DOCS_REPLACEMENT[docs]. The raw scope drops every line inside a marts
-    block; the marts block of section 2 is replaced by RAW_BRIEF_LINE.
+    block; the n-th marts block of section 2 is replaced by RAW_BRIEF_LINES[n].
     """
     if mode not in BRIEF_MODES:
         raise ValueError(f"unknown brief mode {mode!r}")
@@ -197,7 +202,7 @@ def brief_text(mode="full", docs="full", scope="marts"):
     if scope not in SCOPE_MODES:
         raise ValueError(f"unknown scope {scope!r}")
     drop = {"rules": mode == "minimal", "docs": docs != "full", "marts": scope == "raw"}
-    replacement = {"rules": None, "docs": DOCS_REPLACEMENT.get(docs), "marts": RAW_BRIEF_LINE}
+    replacement = {"rules": (), "docs": (DOCS_REPLACEMENT.get(docs),), "marts": RAW_BRIEF_LINES}
     markers = {RULES_START: ("rules", True), RULES_END: ("rules", False),
                DOCS_START: ("docs", True), DOCS_END: ("docs", False),
                MARTS_START: ("marts", True), MARTS_END: ("marts", False)}
@@ -216,16 +221,17 @@ def brief_text(mode="full", docs="full", scope="marts"):
             if opening:
                 blocks[kind] += 1
                 if heading.startswith("## 2."):
+                    if drop[kind] and in_section_2[kind] < len(replacement[kind]):
+                        kept.append(replacement[kind][in_section_2[kind]] + "\n")
                     in_section_2[kind] += 1
-                    if drop[kind] and replacement[kind]:
-                        kept.append(replacement[kind] + "\n")
             continue
         if any(inside[k] and drop[k] for k in drop):
             continue
         kept.append(line)
-    if any(inside.values()) or not blocks["rules"] or in_section_2["docs"] != 1 or in_section_2["marts"] != 1:
-        raise ValueError("BRIEF.md needs balanced markers, a rules block, and one docs and one marts block in "
-                         "section 2")
+    if any(inside.values()) or not blocks["rules"] or in_section_2["docs"] != 1 \
+            or in_section_2["marts"] != len(RAW_BRIEF_LINES):
+        raise ValueError(f"BRIEF.md needs balanced markers, a rules block, one docs block and {len(RAW_BRIEF_LINES)} "
+                         "marts blocks in section 2")
     return "".join(kept)
 
 

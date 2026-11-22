@@ -5,8 +5,11 @@ Layers, each one enough on its own for the cases it covers:
    network access, no ATTACH, no extension install.
 2. Statement check: exactly one statement, a SELECT starting with SELECT or WITH.
 3. Table check (sqlglot, fail closed): only real tables in the scope's schema (marts by default, raw for the raw
-   scope) or information_schema, plus the query's own CTE names. Table functions (read_csv, read_text, range, ...)
-   are rejected.
+   scope), information_schema.tables and information_schema.columns, plus the query's own CTE names. Table functions
+   (read_csv, read_text, range, ...) are rejected. The SQL of the models is never readable: information_schema.views,
+   duckdb_views(), duckdb_tables() and the sqlite/pg catalog tables get MODEL_SQL_TEXT. In the raw scope every
+   reference to information_schema.tables or .columns is rewritten to a subquery filtered to the raw schema, so the
+   marts, staging and intermediate tables stay hidden (the marts scope runs the model's SQL verbatim).
 4. Limits: 30 seconds per query (the query is interrupted), 50 rows returned.
 
 run_sql never raises: every failure comes back to the model as text.
@@ -26,6 +29,11 @@ DB_PATH = ROOT / "warehouse.duckdb"
 DEFAULT_SCHEMA = "marts"
 ALLOWED_SCHEMAS = ("marts", "information_schema")
 SCOPES = {"marts": "marts", "raw": "raw"}  # scope -> the one data schema the agent may read
+INFO_SCHEMA_TABLES = ("tables", "columns")  # the only information_schema views that can be read
+MODEL_SQL_TEXT = "The SQL of the models is not readable."
+MODEL_SQL_SOURCES = frozenset({  # in any schema, as a table or a table function; plus information_schema.views
+    "duckdb_views", "duckdb_tables", "sqlite_master", "sqlite_schema", "sqlite_temp_master", "sqlite_temp_schema",
+    "pg_views", "pg_tables", "pg_matviews"})
 ALLOWED_CATALOGS = ("", "warehouse")
 TIMEOUT_SECONDS = 30
 MAX_ROWS = 50
@@ -125,6 +133,12 @@ class Sandbox:
             return f"ERROR: the query could not be checked, so it was rejected. {self.allowed_text}"
         cte_names = {c.alias_or_name.lower() for c in tree.find_all(exp.CTE)}
         for table in tree.find_all(exp.Table):
+            source, db = (getattr(table.this, "name", "") or "").lower(), table.db.lower()
+            if source in MODEL_SQL_SOURCES or (db == "information_schema" and source == "views"):
+                return f"ERROR: {MODEL_SQL_TEXT}"
+            if db == "information_schema" and source not in INFO_SCHEMA_TABLES:
+                return (f"ERROR: information_schema.{source} is not available. Only information_schema.tables and "
+                        "information_schema.columns can be read.")
             if not isinstance(table.this, exp.Identifier):
                 return f"ERROR: table functions such as {table.sql(dialect='duckdb')[:60]} are not allowed. {self.allowed_text}"
             name, schema, catalog = table.name.lower(), table.db.lower(), table.catalog.lower()
@@ -140,8 +154,32 @@ class Sandbox:
 
     # -- execution ---------------------------------------------------------------------------------------
 
-    def run_sql(self, sql):
+    def prepare(self, sql):
+        """(error, None) when the query is rejected, else (None, the SQL to run). The marts scope runs sql as sent;
+        the raw scope filters information_schema.tables and .columns to the raw schema."""
         error = self.check(sql)
+        if error or self.scope == "marts":
+            return error, (None if error else sql)
+        tree = sqlglot.parse_one(sql, read="duckdb")
+        info = [t for t in tree.find_all(exp.Table)
+                if t.db.lower() == "information_schema" and t.name.lower() in INFO_SCHEMA_TABLES]
+        if not info:
+            return None, sql
+
+        def filtered(node):
+            if isinstance(node, exp.Table) and node.db.lower() == "information_schema" \
+                    and node.name.lower() in INFO_SCHEMA_TABLES:
+                inner = sqlglot.parse_one(f"SELECT * FROM information_schema.{node.name.lower()} "
+                                          f"WHERE table_schema = '{self.schema}'", read="duckdb")
+                return exp.Subquery(this=inner, alias=exp.TableAlias(this=exp.to_identifier(node.alias_or_name)))
+            return node
+
+        rewritten = tree.transform(filtered).sql(dialect="duckdb")
+        error = self.check(rewritten)
+        return (error, None) if error else (None, rewritten)
+
+    def run_sql(self, sql):
+        error, sql = self.prepare(sql)
         if error:
             return error
         timer = threading.Timer(self.timeout, self.con.interrupt)

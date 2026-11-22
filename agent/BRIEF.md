@@ -18,8 +18,10 @@
   dim_products.
 <!-- marts:end -->
 - May read information_schema to check which tables and columns exist.
+<!-- marts:start -->
 - Cannot see anything under evals/ (except evals/ANSWER_FORMAT.md, loaded by the agent's code from its
   allowed list), the raw tables, or the SQL of the dbt models.
+<!-- marts:end -->
 
 ## 3. What it can do
 - One tool for v1: run_sql, read-only, on warehouse.duckdb. No web, no Python, no file writes.

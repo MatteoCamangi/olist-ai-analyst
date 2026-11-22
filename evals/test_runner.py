@@ -96,7 +96,34 @@ import json, os, sys
 sys.stdin.read()
 with open(os.environ["AGENT_TRACE_FILE"], "a") as f:
     f.write(json.dumps({"event": "error", "message": "boom TRACE-MARKER-7f3a"}) + "\\n")
+print('USAGE {"input_tokens": 30, "output_tokens": 3, "tool_calls": 0}', file=sys.stderr)  # failed after the API
 sys.exit(1)
+""",
+    "early_crasher": """
+import sys
+sys.stdin.read()
+print("analyst: bad config: ANALYST_SCOPE must be one of marts, raw, got 'x'", file=sys.stderr)
+print('USAGE {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0, "model": null, "docs": null, '
+      '"brief": null, "scope": null}', file=sys.stderr)
+sys.exit(2)
+""",
+    "silent_crasher": """
+import sys
+sys.stdin.read()
+raise ImportError("no module named anthropic")
+""",
+    "first_crasher": """
+import json, sys
+from pathlib import Path
+q = json.loads(sys.stdin.read())
+counter = Path(__file__).parent / "first_crasher.count"
+n = int(counter.read_text()) if counter.exists() else 0
+counter.write_text(str(n + 1))
+if n == 0:
+    print('USAGE {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0}', file=sys.stderr)
+    sys.exit(1)
+print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
+print('USAGE {"input_tokens": 10, "output_tokens": 2, "tool_calls": 1}', file=sys.stderr)
 """,
 }
 
@@ -372,6 +399,46 @@ def test_summaries_hold_no_per_question_data(env):
         assert config is None or (set(config) == {"model", "docs", "brief", "scope"}
                                   and all(isinstance(v, str) for v in config.values())), config
         assert_no_leak(summary, path.name)
+
+
+def run_files(env):
+    return sorted(env.runs.rglob("*.json")) if env.runs.exists() else []
+
+
+@with_env
+def test_all_failed_early_not_saved(env):
+    for agent, split in (("early_crasher", "dev"), ("silent_crasher", "dev"), ("early_crasher", "all"),
+                         ("silent_crasher", "hidden")):
+        extra = ["--confirm-hidden"] if split != "dev" else []
+        p = env.run("--split", split, "--label", f"{agent}-{split}", *extra, agent=agent)
+        assert p.returncode == 3, (agent, split, p.returncode, p.stderr[-500:])
+        assert "every question failed before reaching the model; summary not saved" in p.stderr, p.stderr
+        assert "summary:" not in p.stdout and not run_files(env), (agent, split, run_files(env))
+        if split != "dev":
+            assert not ID.search(p.stdout + p.stderr), "question ids printed for a hidden run"
+    p = env.run("--split", "dev", "--label", "early", "--questions", "q001", agent="early_crasher")
+    assert p.returncode == 3 and "agent failed: exit code 2" in p.stderr and "analyst: bad config" in p.stderr
+    assert "USAGE" not in p.stderr
+
+
+@with_env
+def test_partial_failures_saved(env):
+    p = env.run("--split", "dev", "--label", "first-crash", agent="first_crasher")
+    ok(p, "first_crasher")
+    summary, detail = env.latest(p)
+    outcomes = [q["result"]["outcome"] for q in detail["questions"]]
+    assert outcomes.count("format_error") == 1 and outcomes.count("correct") == len(outcomes) - 1, outcomes
+    assert all("failed_early" not in q for q in detail["questions"]), "per-question guard flag in detail"
+    assert "failed_early" not in summary and "WARNING" not in p.stderr
+    p = env.run("--split", "dev", "--label", "crash", "--questions", "q001,q002", agent="crasher")  # 50 tokens each
+    ok(p, "crasher with tokens")
+    p = env.run("--split", "dev", "--label", "slow", "--timeout", "1", "--questions", "q001", agent="sleeper")
+    ok(p, "timeout")  # a killed agent may have spent tokens: saved
+    rdir = env.dir / "empty"
+    rdir.mkdir()
+    p = env.run("--split", "dev", "--label", "files", "--responses-dir", str(rdir))  # replays: no guard
+    ok(p, "responses-dir")
+    assert len(env.summaries()) == 4
 
 
 @with_env
