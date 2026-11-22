@@ -140,3 +140,60 @@ each injected case is exactly its base plus its declared edits; and that a fresh
 without the detail files or the database).
 
 Like the rest of evals/, this folder must never be inside the analyst agent's sandbox.
+
+## Reviewer agent and runner
+
+`agent/reviewer.py` reviews one case: JSON on stdin (or a file path), the verdict JSON on stdout, and a final stderr
+line `USAGE {"input_tokens": n, "output_tokens": n, "model": s}`. It makes exactly one model call with no tools.
+The system prompt is agent/REVIEWER_BRIEF.md, docs/metrics.md and evals/ANSWER_FORMAT.md, verbatim and in that order,
+sent as one cached block (docs/data_notes.md is not included). The user message is built only from `question`,
+`answer_schema`, `response` and `trace`; the trace is reduced to its queries and results, numbered Query 1..n, and
+tool ids are dropped. Model: `REVIEWER_MODEL` (default claude-sonnet-5-5); key: `OLIST_AGENT_API_KEY`. Streaming,
+retries and usage counting are imported from agent/analyst.py. There is no server-side refusal fallback, because a
+fallback would answer with another model; a refusal is an agent failure (exit 1).
+
+The reply must be exactly one JSON object `{"verdict", "reason", "findings": [{"check", "severity", "evidence",
+"fix"}]}` with the brief's verdicts, check names and severities. Anything else (prose or a code fence around it, a
+missing or extra key, an unknown check) gives `{"verdict": null, "error": "format_error"}` with exit 0. A verdict is
+never guessed.
+
+```
+python evals/reviewer/run_reviewer_eval.py --label baseline
+python evals/reviewer/run_reviewer_eval.py --label quick --only q013.ok,q013.wrong_filter
+python evals/reviewer/test_reviewer.py         # tests, fake client and fake agents only
+```
+
+The runner starts `--agent-cmd` (default `python agent/reviewer.py`) once per case, with a `--timeout` (default
+300 s), and passes only the four fields above. The answer key stays in the runner.
+
+| Metric | Counts a case when | Denominator |
+|---|---|---|
+| `verdict_match` | the verdict equals the expected one | all cases |
+| `dangerous_miss` | approve on a case expected revise or reject | cases expected revise or reject |
+| `false_alarm` | revise or reject on a case expected approve | cases expected approve |
+| `soft_miss` | reject instead of revise, or revise instead of reject | cases expected revise or reject |
+| `check_recall` | every expected check is among the flagged checks (extra flags cost nothing) | cases with expected checks |
+| `evidence_valid` | every finding passes the evidence rule | cases with at least one finding |
+| `invented_numbers` | a finding's evidence or fix has a number found in no source | cases with at least one finding |
+| `format_error`, `agent_failure` | the reviewer returned a format error, or crashed, timed out or printed no JSON object | all cases |
+
+A format error or agent failure never counts as a dangerous miss or a false alarm; it fails `verdict_match` and
+`check_recall`.
+
+**Evidence rule.** Texts are compared after lowercasing and collapsing whitespace. The sources are the response, each
+query's SQL and result, docs/metrics.md and evals/ANSWER_FORMAT.md. A finding's evidence is valid when (a) every
+query reference (`query N`, `queries N and M`, `Q N`) points to a query that exists (1 to the number of queries),
+(b) every quoted span (`"..."`, `“...”` or `` `...` ``) of 4 or more characters occurs in a source, and (c) there is
+an anchor: a valid query reference, a found quoted span, or the whole evidence (8 or more characters) found in a
+source.
+
+**Invented-number rule.** Numbers are read from each finding's evidence and fix (`-?\d[\d,]*(\.\d+)?%?`, commas and
+`%` dropped), leaving out query references and whole numbers from 0 to 10. A number is supported when some number in
+the sources equals it, or rounds to it at its own number of decimals (display rounding: 21.4 is supported by 21.41).
+The docs' illustrative example values count as sources, so a number copied from them is not caught.
+
+Outputs: `evals/reviewer/runs/<UTC timestamp>_<label>.json` (committed: counts and rates as `{n, of, rate}`, tables
+per fault type and per check, the expected × got confusion matrix, token totals, `agent_config` with the model from
+the first case's USAGE line, git sha) and `evals/reviewer/runs/detail/<same name>.json` (gitignored: each case's
+reviewer output, scores, stderr tail and usage). If every case fails before reaching the model (agent failure and zero
+tokens), the runner prints a warning, saves nothing and exits 3.
