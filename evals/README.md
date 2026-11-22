@@ -122,7 +122,7 @@ agent command, number of questions, counts and rates per split, usage totals and
 `evals/runs/detail/<same name>.json` (per-question results and raw responses). Commit the summaries; the detail
 folder is gitignored.
 
-**Agent configuration (ablations).** `agent/analyst.py` reads three environment variables, so the same code can run
+**Agent configuration (ablations).** `agent/analyst.py` reads four environment variables, so the same code can run
 with parts removed. Unset or empty means the default, which is the v1 agent (the same prompt, byte for byte, and model):
 
 | Variable | Values | Effect |
@@ -130,15 +130,22 @@ with parts removed. Unset or empty means the default, which is the v1 agent (the
 | `ANALYST_MODEL` | model id starting with `claude-` (default `claude-sonnet-5-5`) | the model called |
 | `ANALYST_DOCS` | `full` (default), `schema`, `none` | `full`: docs/metrics.md and the marts yml docs. `schema`: the marts yml model and column descriptions only (doc() blocks resolved), no docs/metrics.md. `none`: no documents; the agent finds tables through information_schema |
 | `ANALYST_BRIEF` | `full` (default), `minimal` | `minimal` drops the rules between the `<!-- rules:start -->` / `<!-- rules:end -->` markers of agent/BRIEF.md (section 4); role, tool, limits and the answer-format instruction stay |
+| `ANALYST_SCOPE` | `marts` (default), `raw` | `raw`: the sandbox reads only the raw schema (the source tables as loaded, unqualified names resolve there) and information_schema; marts, staging and intermediate are rejected. The run_sql description names the raw schema, the prompt says the raw tables are discovered with information_schema, and the brief lines between `<!-- marts:start -->` / `<!-- marts:end -->` are replaced by one line. Requires `ANALYST_DOCS=none` (the documents describe the marts) |
+
+With `ANALYST_DOCS` other than `full`, the brief lines between `<!-- docs:start -->` / `<!-- docs:end -->` (the
+documents line of section 2 and the relative-dates rule) are dropped and section 2 gets a one-line replacement.
+Marker lines never reach the prompt. The raw scope does not hide metadata: information_schema still lists the marts
+tables and shows the SQL of the staging and intermediate views.
 
 evals/ANSWER_FORMAT.md is in the prompt in every mode, and the agent's allowed-documents list does not change. An
 invalid value exits 2 before any API call. The agent writes the configuration in its USAGE line
-(`"model"`, `"docs"`, `"brief"`); the runner reads it from the first question and stores one `agent_config` object in
+(`"model"`, `"docs"`, `"brief"`, `"scope"`); the runner reads it from the first question and stores one `agent_config` object in
 the summary (null with `--responses-dir` or an agent that does not report it). Label runs after the ablation:
 
 ```
 ANALYST_DOCS=schema python evals/run_eval.py --split dev --label docs-schema --agent-cmd "python agent/analyst.py"
 ANALYST_DOCS=none ANALYST_BRIEF=minimal python evals/run_eval.py --split dev --label bare --agent-cmd "python agent/analyst.py"
+ANALYST_SCOPE=raw ANALYST_DOCS=none python evals/run_eval.py --split dev --label raw --agent-cmd "python agent/analyst.py"
 ```
 
 **Hidden runs.** `--split hidden` and `--split all` are refused without `--confirm-hidden`. For these splits the

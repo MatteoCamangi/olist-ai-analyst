@@ -37,8 +37,17 @@ print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["ques
 counter = Path(__file__).parent / "configured.count"
 n = int(counter.read_text()) if counter.exists() else 0
 counter.write_text(str(n + 1))
-config = {"model": "claude-first-x" if n == 0 else "claude-later-x", "docs": "schema", "brief": "minimal"}
+config = {"model": "claude-first-x" if n == 0 else "claude-later-x", "docs": "none", "brief": "minimal",
+          "scope": "raw"}
 print("USAGE " + json.dumps({"input_tokens": 10, "output_tokens": 2, "tool_calls": 1, **config}), file=sys.stderr)
+""",
+    "three_keys": """
+import json, sys
+from pathlib import Path
+q = json.loads(sys.stdin.read())
+print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
+print('USAGE {"input_tokens": 1, "output_tokens": 1, "tool_calls": 1, "model": "claude-x", "docs": "full", '
+      '"brief": "full"}', file=sys.stderr)
 """,
     "refuser": """
 import json, sys
@@ -310,13 +319,18 @@ def test_agent_config_in_summary(env):
     p = env.run("--split", "dev", "--label", "config", agent="configured")
     ok(p, "configured")
     summary, detail = env.latest(p)
-    first = {"model": "claude-first-x", "docs": "schema", "brief": "minimal"}
+    first = {"model": "claude-first-x", "docs": "none", "brief": "minimal", "scope": "raw"}
     assert summary["agent_config"] == first, summary["agent_config"]  # the first question's, later ones ignored
     assert detail["agent_config"] == first
     assert all("agent_config" not in q and "usage" not in q for q in detail["questions"]), "per-question config"
     assert "claude-later-x" not in json.dumps(summary)  # (detail keeps each raw stderr_tail, as before)
-    assert "agent_config: model claude-first-x  docs schema  brief minimal" in p.stdout
+    assert "agent_config: model claude-first-x  docs none  brief minimal  scope raw" in p.stdout
     assert summary["usage"]["tool_calls"] == sum(e["split"] == "dev" for e in Q.values())
+
+    p = env.run("--split", "dev", "--label", "noscope", "--questions", "q001", agent="three_keys")  # no scope
+    ok(p, "three_keys")
+    summary, _ = env.latest(p)
+    assert summary["agent_config"] is None, summary["agent_config"]
 
     p = env.run("--split", "dev", "--label", "noconfig", "--questions", "q001", agent="perfect")  # counts only
     ok(p, "perfect")
@@ -355,7 +369,7 @@ def test_summaries_hold_no_per_question_data(env):
         assert set(summary["usage"]) == {"input_tokens", "output_tokens", "tool_calls"}
         assert all(type(v) is int for v in summary["usage"].values())
         config = summary["agent_config"]
-        assert config is None or (set(config) == {"model", "docs", "brief"}
+        assert config is None or (set(config) == {"model", "docs", "brief", "scope"}
                                   and all(isinstance(v, str) for v in config.values())), config
         assert_no_leak(summary, path.name)
 

@@ -13,8 +13,10 @@
 <!-- docs:start -->
 - docs/metrics.md (metric definitions) and the dbt model docs for the marts.
 <!-- docs:end -->
+<!-- marts:start -->
 - Queries the marts layer only: fct_orders, fct_order_items, fct_order_sellers, dim_customers and
   dim_products.
+<!-- marts:end -->
 - May read information_schema to check which tables and columns exist.
 - Cannot see anything under evals/ (except evals/ANSWER_FORMAT.md, loaded by the agent's code from its
   allowed list), the raw tables, or the SQL of the dbt models.
@@ -29,8 +31,10 @@
 - Revenue means item price on delivered orders. Freight is not revenue.
 - A late order is one delivered after its estimated date. Delivery times and late rates use
   delivered orders that have a delivered date.
+<!-- marts:start -->
 - Pick the mart whose grain matches the question. Never join two tables at different grains
   without reducing the many side first (fan-out).
+<!-- marts:end -->
 - A filter on the right-hand table of a LEFT JOIN turns it into an inner join. Put the filter
   in the ON clause when that is not intended.
 - Rates over small groups are noisy: apply a minimum volume and state the threshold used.

@@ -21,7 +21,7 @@ Inspect one dev question with  python evals/show_detail.py <detail file> <id>.
 
 Usage: the agent may write one stderr line  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n, ...}.
 The summary keeps the totals over all questions (failed calls included), never per-question figures.
-Agent configuration: if that line also holds "model", "docs" and "brief" (strings), the summary stores them once as
+Agent configuration: if that line also holds "model", "docs", "brief" and "scope" (strings), the summary stores them once as
 agent_config, read from the first question only (null when absent, and with --responses-dir).
 """
 import argparse
@@ -44,7 +44,7 @@ RUNS = ROOT / "evals" / "runs"
 PAYLOAD_FIELDS = ("question", "answer_schema")  # the only entry fields the agent ever sees
 TRACE_ENV = "AGENT_TRACE_FILE"
 USAGE_KEYS = ("input_tokens", "output_tokens", "tool_calls")
-CONFIG_KEYS = ("model", "docs", "brief")
+CONFIG_KEYS = ("model", "docs", "brief", "scope")
 PER_RUN_ONLY = ("usage", "agent_config")  # kept per question in memory, stored only as one run-level value
 USAGE_LINE = re.compile(r"^USAGE (\{.*\})\s*$", re.MULTILINE)
 RATE_KEYS = ("questions", "answerable", "correct", "accuracy", "wrong_confident_rate", "false_refusal_rate",
@@ -114,7 +114,7 @@ def parse_usage(stderr):
 
 
 def parse_agent_config(stderr):
-    """model, docs and brief from the last USAGE line of the agent's stderr that holds all three, or None."""
+    """model, docs, brief and scope from the last USAGE line of the agent's stderr that holds all three, or None."""
     for raw in reversed(USAGE_LINE.findall(stderr or "")):
         try:
             data = json.loads(raw)
@@ -284,7 +284,7 @@ def main(argv=None):
               f"tool_calls {u['tool_calls']}")
     if summary["agent_config"] is not None:
         c = summary["agent_config"]
-        print(f"agent_config: model {c['model']}  docs {c['docs']}  brief {c['brief']}")
+        print(f"agent_config: model {c['model']}  docs {c['docs']}  brief {c['brief']}  scope {c['scope']}")
     if show_ids:
         manual = full["all"]["manual_review"]
         print(f"manual_review: {', '.join(manual) if manual else 'none'}")
