@@ -15,12 +15,18 @@ Outputs:
     evals/runs/detail/<UTC timestamp>_<split>_<label>.json  per-question results, responses and traces (gitignored)
 Console: per-question lines for dev only. Hidden and all print rates only.
 
+Guard: with --agent-cmd, if every question failed before reaching the model (the agent exited non-zero or printed
+nothing, and reported zero tokens or no USAGE line; timeouts excluded, since a killed agent cannot report what it
+spent), the runner prints a warning with the failure reasons, saves no summary and no detail file, and exits 3.
+
 Trace: each agent call gets its own temp file in AGENT_TRACE_FILE. The JSON lines the agent appends there are
 stored as "trace" in the detail file only (null with --responses-dir), never in the summary or on the console.
 Inspect one dev question with  python evals/show_detail.py <detail file> <id>.
 
-Usage: the agent may write one stderr line  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n}.
+Usage: the agent may write one stderr line  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n, ...}.
 The summary keeps the totals over all questions (failed calls included), never per-question figures.
+Agent configuration: if that line also holds "model", "docs", "brief" and "scope" (strings), the summary stores them once as
+agent_config, read from the first question only (null when absent, and with --responses-dir).
 """
 import argparse
 import datetime as dt
@@ -42,6 +48,8 @@ RUNS = ROOT / "evals" / "runs"
 PAYLOAD_FIELDS = ("question", "answer_schema")  # the only entry fields the agent ever sees
 TRACE_ENV = "AGENT_TRACE_FILE"
 USAGE_KEYS = ("input_tokens", "output_tokens", "tool_calls")
+CONFIG_KEYS = ("model", "docs", "brief", "scope")
+PER_RUN_ONLY = ("usage", "agent_config", "failed_early")  # kept per question in memory, stored only as one run-level value
 USAGE_LINE = re.compile(r"^USAGE (\{.*\})\s*$", re.MULTILINE)
 RATE_KEYS = ("questions", "answerable", "correct", "accuracy", "wrong_confident_rate", "false_refusal_rate",
              "incomplete_refusal_rate", "format_error_rate")
@@ -109,6 +117,18 @@ def parse_usage(stderr):
     return None
 
 
+def parse_agent_config(stderr):
+    """model, docs, brief and scope from the last USAGE line of the agent's stderr that holds all three, or None."""
+    for raw in reversed(USAGE_LINE.findall(stderr or "")):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and all(isinstance(data.get(k), str) and data[k] for k in CONFIG_KEYS):
+            return {k: data[k] for k in CONFIG_KEYS}
+    return None
+
+
 def usage_totals(items):
     totals = dict.fromkeys(USAGE_KEYS, 0)
     for item in items:
@@ -135,7 +155,7 @@ def failed_result(entry, reason):
 
 def run_one(args, entry):
     start = time.monotonic()
-    response, stderr, trace = None, "", None
+    response, stderr, trace, failed = None, "", None, None
     try:
         if args.responses_dir:
             response, stderr = read_response(args.responses_dir, entry)
@@ -143,13 +163,24 @@ def run_one(args, entry):
             response, stderr, trace = call_agent(args.agent_cmd, entry, args.timeout)
         result = grader.grade(entry, response)
     except AgentFailed as exc:
+        failed = exc.args[0]
         result = failed_result(entry, exc.args[0])
         if len(exc.args) > 1:
             stderr = exc.args[1] or ""
         if len(exc.args) > 2:
             trace = exc.args[2]
+    usage = parse_usage(stderr)
+    tokens = (usage["input_tokens"] + usage["output_tokens"]) if usage else 0
     return {"result": result, "response": response, "trace": trace, "stderr_tail": (stderr or "")[-2000:],
-            "seconds": round(time.monotonic() - start, 2), "usage": parse_usage(stderr)}
+            "seconds": round(time.monotonic() - start, 2), "usage": usage,
+            "agent_config": parse_agent_config(stderr),
+            "failed_early": bool(failed) and not failed.startswith("agent failed: timeout") and tokens == 0}
+
+
+def last_message(stderr):
+    """The last stderr line that is not a USAGE line (the agent's own error message), or ''."""
+    lines = [ln for ln in (stderr or "").splitlines() if ln.strip() and not USAGE_LINE.match(ln)]
+    return lines[-1].strip()[:300] if lines else ""
 
 
 def git_info():
@@ -237,6 +268,14 @@ def main(argv=None):
         if show_ids:
             r = item["result"]
             print(f"{r['id']}  {r['outcome']:<18}  {'; '.join(r['reasons'])}".rstrip())
+    if args.agent_cmd and items and all(i["failed_early"] for i in items):
+        reasons = sorted({i["result"]["reasons"][0] for i in items})
+        print("WARNING: every question failed before reaching the model; summary not saved", file=sys.stderr)
+        print(f"failures: {'; '.join(reasons)}", file=sys.stderr)
+        message = last_message(items[0]["stderr_tail"])
+        if message:
+            print(f"agent stderr: {message}", file=sys.stderr)
+        return 3
     results = [i["result"] for i in items]
     full = grader.summarize(results)
 
@@ -245,11 +284,12 @@ def main(argv=None):
                "agent_cmd": args.agent_cmd,
                "responses_dir": str(args.responses_dir) if args.responses_dir else None,
                "timeout": args.timeout, "n_questions": len(entries), "rates": rates_only(full),
-               "usage": None if args.responses_dir else usage_totals(items)}
+               "usage": None if args.responses_dir else usage_totals(items),
+               "agent_config": items[0]["agent_config"] if items else None}
     if args.split != "dev":
         summary["earlier_hidden_runs"] = earlier_hidden_runs(runs_dir)
     detail = {**summary, "summary": full,
-              "questions": [{"id": i["result"]["id"], **{k: v for k, v in i.items() if k != "usage"}}
+              "questions": [{"id": i["result"]["id"], **{k: v for k, v in i.items() if k not in PER_RUN_ONLY}}
                             for i in items]}
 
     (runs_dir / "detail").mkdir(parents=True, exist_ok=True)
@@ -264,6 +304,9 @@ def main(argv=None):
         u = summary["usage"]
         print(f"usage: input_tokens {u['input_tokens']}  output_tokens {u['output_tokens']}  "
               f"tool_calls {u['tool_calls']}")
+    if summary["agent_config"] is not None:
+        c = summary["agent_config"]
+        print(f"agent_config: model {c['model']}  docs {c['docs']}  brief {c['brief']}  scope {c['scope']}")
     if show_ids:
         manual = full["all"]["manual_review"]
         print(f"manual_review: {', '.join(manual) if manual else 'none'}")

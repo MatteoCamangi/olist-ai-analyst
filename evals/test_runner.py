@@ -29,6 +29,26 @@ q = json.loads(sys.stdin.read())
 print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
 print('USAGE {"input_tokens": 1000, "output_tokens": 200, "tool_calls": 3}', file=sys.stderr)
 """,
+    "configured": """
+import json, sys
+from pathlib import Path
+q = json.loads(sys.stdin.read())
+print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
+counter = Path(__file__).parent / "configured.count"
+n = int(counter.read_text()) if counter.exists() else 0
+counter.write_text(str(n + 1))
+config = {"model": "claude-first-x" if n == 0 else "claude-later-x", "docs": "none", "brief": "minimal",
+          "scope": "raw"}
+print("USAGE " + json.dumps({"input_tokens": 10, "output_tokens": 2, "tool_calls": 1, **config}), file=sys.stderr)
+""",
+    "three_keys": """
+import json, sys
+from pathlib import Path
+q = json.loads(sys.stdin.read())
+print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
+print('USAGE {"input_tokens": 1, "output_tokens": 1, "tool_calls": 1, "model": "claude-x", "docs": "full", '
+      '"brief": "full"}', file=sys.stderr)
+""",
     "refuser": """
 import json, sys
 json.loads(sys.stdin.read())
@@ -76,7 +96,34 @@ import json, os, sys
 sys.stdin.read()
 with open(os.environ["AGENT_TRACE_FILE"], "a") as f:
     f.write(json.dumps({"event": "error", "message": "boom TRACE-MARKER-7f3a"}) + "\\n")
+print('USAGE {"input_tokens": 30, "output_tokens": 3, "tool_calls": 0}', file=sys.stderr)  # failed after the API
 sys.exit(1)
+""",
+    "early_crasher": """
+import sys
+sys.stdin.read()
+print("analyst: bad config: ANALYST_SCOPE must be one of marts, raw, got 'x'", file=sys.stderr)
+print('USAGE {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0, "model": null, "docs": null, '
+      '"brief": null, "scope": null}', file=sys.stderr)
+sys.exit(2)
+""",
+    "silent_crasher": """
+import sys
+sys.stdin.read()
+raise ImportError("no module named anthropic")
+""",
+    "first_crasher": """
+import json, sys
+from pathlib import Path
+q = json.loads(sys.stdin.read())
+counter = Path(__file__).parent / "first_crasher.count"
+n = int(counter.read_text()) if counter.exists() else 0
+counter.write_text(str(n + 1))
+if n == 0:
+    print('USAGE {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0}', file=sys.stderr)
+    sys.exit(1)
+print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
+print('USAGE {"input_tokens": 10, "output_tokens": 2, "tool_calls": 1}', file=sys.stderr)
 """,
 }
 
@@ -292,6 +339,106 @@ def test_usage_null_for_responses_dir(env):
     ok(p, "responses-dir")
     summary, _ = env.latest(p)
     assert summary["usage"] is None and "usage:" not in p.stdout
+
+
+@with_env
+def test_agent_config_in_summary(env):
+    p = env.run("--split", "dev", "--label", "config", agent="configured")
+    ok(p, "configured")
+    summary, detail = env.latest(p)
+    first = {"model": "claude-first-x", "docs": "none", "brief": "minimal", "scope": "raw"}
+    assert summary["agent_config"] == first, summary["agent_config"]  # the first question's, later ones ignored
+    assert detail["agent_config"] == first
+    assert all("agent_config" not in q and "usage" not in q for q in detail["questions"]), "per-question config"
+    assert "claude-later-x" not in json.dumps(summary)  # (detail keeps each raw stderr_tail, as before)
+    assert "agent_config: model claude-first-x  docs none  brief minimal  scope raw" in p.stdout
+    assert summary["usage"]["tool_calls"] == sum(e["split"] == "dev" for e in Q.values())
+
+    p = env.run("--split", "dev", "--label", "noscope", "--questions", "q001", agent="three_keys")  # no scope
+    ok(p, "three_keys")
+    summary, _ = env.latest(p)
+    assert summary["agent_config"] is None, summary["agent_config"]
+
+    p = env.run("--split", "dev", "--label", "noconfig", "--questions", "q001", agent="perfect")  # counts only
+    ok(p, "perfect")
+    summary, _ = env.latest(p)
+    assert summary["agent_config"] is None and "agent_config:" not in p.stdout
+
+    rdir = env.dir / "responses"
+    rdir.mkdir()
+    p = env.run("--split", "dev", "--label", "files", "--responses-dir", str(rdir))
+    ok(p, "responses-dir")
+    summary, _ = env.latest(p)
+    assert summary["agent_config"] is None
+
+
+SUMMARY_KEYS = {"timestamp", "split", "label", "git_sha", "git_dirty", "agent_cmd", "responses_dir", "timeout",
+                "n_questions", "rates", "usage", "agent_config"}
+RATE_KEYS = {"questions", "answerable", "correct", "accuracy", "wrong_confident_rate", "false_refusal_rate",
+             "incomplete_refusal_rate", "format_error_rate"}
+
+
+@with_env
+def test_summaries_hold_no_per_question_data(env):
+    for split, agent in (("dev", "configured"), ("hidden", "configured"), ("all", "configured"), ("dev", "crasher"),
+                         ("all", "perfect")):
+        extra = ["--confirm-hidden"] if split != "dev" else []
+        ok(env.run("--split", split, "--label", f"{agent}-{split}", *extra, agent=agent), f"{agent} {split}")
+    paths = env.summaries()
+    assert len(paths) == 5, paths
+    for path in paths:
+        summary = json.loads(path.read_text())
+        expected = SUMMARY_KEYS | ({"earlier_hidden_runs"} if summary["split"] != "dev" else set())
+        assert set(summary) == expected, (path.name, set(summary) ^ expected)
+        assert not ID.search(path.read_text()), f"{path.name} holds question ids"
+        for split, rates in summary["rates"].items():
+            assert set(rates) == RATE_KEYS and all(isinstance(v, (int, float)) for v in rates.values()), split
+        assert set(summary["usage"]) == {"input_tokens", "output_tokens", "tool_calls"}
+        assert all(type(v) is int for v in summary["usage"].values())
+        config = summary["agent_config"]
+        assert config is None or (set(config) == {"model", "docs", "brief", "scope"}
+                                  and all(isinstance(v, str) for v in config.values())), config
+        assert_no_leak(summary, path.name)
+
+
+def run_files(env):
+    return sorted(env.runs.rglob("*.json")) if env.runs.exists() else []
+
+
+@with_env
+def test_all_failed_early_not_saved(env):
+    for agent, split in (("early_crasher", "dev"), ("silent_crasher", "dev"), ("early_crasher", "all"),
+                         ("silent_crasher", "hidden")):
+        extra = ["--confirm-hidden"] if split != "dev" else []
+        p = env.run("--split", split, "--label", f"{agent}-{split}", *extra, agent=agent)
+        assert p.returncode == 3, (agent, split, p.returncode, p.stderr[-500:])
+        assert "every question failed before reaching the model; summary not saved" in p.stderr, p.stderr
+        assert "summary:" not in p.stdout and not run_files(env), (agent, split, run_files(env))
+        if split != "dev":
+            assert not ID.search(p.stdout + p.stderr), "question ids printed for a hidden run"
+    p = env.run("--split", "dev", "--label", "early", "--questions", "q001", agent="early_crasher")
+    assert p.returncode == 3 and "agent failed: exit code 2" in p.stderr and "analyst: bad config" in p.stderr
+    assert "USAGE" not in p.stderr
+
+
+@with_env
+def test_partial_failures_saved(env):
+    p = env.run("--split", "dev", "--label", "first-crash", agent="first_crasher")
+    ok(p, "first_crasher")
+    summary, detail = env.latest(p)
+    outcomes = [q["result"]["outcome"] for q in detail["questions"]]
+    assert outcomes.count("format_error") == 1 and outcomes.count("correct") == len(outcomes) - 1, outcomes
+    assert all("failed_early" not in q for q in detail["questions"]), "per-question guard flag in detail"
+    assert "failed_early" not in summary and "WARNING" not in p.stderr
+    p = env.run("--split", "dev", "--label", "crash", "--questions", "q001,q002", agent="crasher")  # 50 tokens each
+    ok(p, "crasher with tokens")
+    p = env.run("--split", "dev", "--label", "slow", "--timeout", "1", "--questions", "q001", agent="sleeper")
+    ok(p, "timeout")  # a killed agent may have spent tokens: saved
+    rdir = env.dir / "empty"
+    rdir.mkdir()
+    p = env.run("--split", "dev", "--label", "files", "--responses-dir", str(rdir))  # replays: no guard
+    ok(p, "responses-dir")
+    assert len(env.summaries()) == 4
 
 
 @with_env

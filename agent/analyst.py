@@ -1,14 +1,32 @@
-"""Analyst agent v1: answers one business question about Olist orders from the marts.
+"""Analyst agent v1: answers one business question about Olist orders from the marts (or, as an ablation, raw).
 
 Usage (from the repo root):
     echo '{"question": "...", "answer_schema": {...}}' | python agent/analyst.py
 
 Reads one JSON object {"question", "answer_schema"} from stdin and prints the full response on stdout: the analysis in
 prose, then the JSON envelope of evals/ANSWER_FORMAT.md as the last ```json block. At exit it always writes one line
-to stderr:  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n}
+to stderr:  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n, "model": s, "docs": s, "brief": s,
+"scope": s}  (model, docs, brief and scope are null when the configuration below is invalid or was not read).
+
+Configuration (ablations), from environment variables; unset or empty means the default, which is the v1 agent:
+    ANALYST_MODEL   model id, must start with "claude-" (default claude-sonnet-5-5)
+    ANALYST_DOCS    full (default): brief, docs/metrics.md, marts yml docs, ANSWER_FORMAT.md
+                    schema: as full without docs/metrics.md (the marts yml docs, doc() blocks resolved, stay)
+                    none: no documents; only the brief and ANSWER_FORMAT.md (tables via information_schema)
+    ANALYST_BRIEF   full (default) | minimal: drops the rules between the rules markers of agent/BRIEF.md
+                    (role, tool, limits and the answer-format instruction stay). In full mode only the marker
+                    lines are removed.
+    The lines of agent/BRIEF.md between docs markers (the document line of section 2, the relative-dates rule)
+    are dropped unless ANALYST_DOCS is full; in section 2 a one-line replacement for the mode takes their place.
+    ANALYST_SCOPE   marts (default) | raw: the sandbox reads the raw schema only (the source tables as loaded,
+                    unqualified names resolve there) and the run_sql description says so. Requires
+                    ANALYST_DOCS=none. The prompt gets RAW_SCOPE_LINE where the marts section would be, and the
+                    lines between marts markers of agent/BRIEF.md are dropped (section 2 gets RAW_BRIEF_LINES).
+    Marker lines never reach the prompt.
 
 Exit codes: 0 answered (the envelope may still say cannot_answer), 1 failure (API error after retries, refusal,
-output limit hit (stop_reason max_tokens) or empty answer), 2 bad input or missing OLIST_AGENT_API_KEY.
+output limit hit (stop_reason max_tokens) or empty answer), 2 bad input, bad configuration or missing
+OLIST_AGENT_API_KEY.
 
 Every model turn is streamed (client.messages.stream) and read with get_final_message(): the SDK requires
 streaming for a max_tokens this large. Adaptive thinking (the model default, not set here) counts against the
@@ -50,6 +68,25 @@ BACKOFF_SECONDS = 2.0
 API_TIMEOUT_SECONDS = 240
 KEY_ENV = "OLIST_AGENT_API_KEY"
 TRACE_ENV = "AGENT_TRACE_FILE"
+MODEL_ENV, DOCS_ENV, BRIEF_ENV, SCOPE_ENV = "ANALYST_MODEL", "ANALYST_DOCS", "ANALYST_BRIEF", "ANALYST_SCOPE"
+DOCS_MODES = ("full", "schema", "none")
+BRIEF_MODES = ("full", "minimal")
+SCOPE_MODES = tuple(sandbox_mod.SCOPES)  # marts, raw
+RULES_START, RULES_END = "<!-- rules:start -->", "<!-- rules:end -->"  # whole lines in agent/BRIEF.md
+DOCS_START, DOCS_END = "<!-- docs:start -->", "<!-- docs:end -->"      # lines that depend on the documents
+DOCS_REPLACEMENT = {  # takes the place of the section 2 docs block when the documents are left out
+    "schema": "- You know the table and column descriptions of the marts.",
+    "none": "- You have no documents; discover tables and columns with information_schema.",
+}
+MARTS_START, MARTS_END = "<!-- marts:start -->", "<!-- marts:end -->"  # lines specific to the marts
+RAW_BRIEF_LINE = "- Queries the raw schema only: the source tables as loaded."
+RAW_BRIEF_LINES = (  # in the raw scope, the n-th marts block of section 2 is replaced by the n-th line
+    RAW_BRIEF_LINE,
+    "- Cannot see anything under evals/ (except evals/ANSWER_FORMAT.md, loaded by the agent's code from its allowed "
+    "list) or the SQL of the dbt models.",
+)
+RAW_SCOPE_LINE = "You can query the raw source tables (schema raw); discover them with information_schema."
+_MODEL_ID = re.compile(r"claude-\S+")
 
 # Every file the agent's prompt is built from. Nothing else is ever read for the model.
 BRIEF = "agent/BRIEF.md"
@@ -132,17 +169,93 @@ def marts_docs():
     return "\n".join(out)
 
 
-def build_system_prompt():
-    return "\n\n".join([
+def read_config(env):
+    """{"model", "docs", "brief", "scope"} from the environment; unset or empty means the default. Raises ValueError."""
+    model = env.get(MODEL_ENV) or MODEL
+    docs = env.get(DOCS_ENV) or "full"
+    brief = env.get(BRIEF_ENV) or "full"
+    if not _MODEL_ID.fullmatch(model):
+        raise ValueError(f"{MODEL_ENV} must be a model id starting with claude-, got {model!r}")
+    if docs not in DOCS_MODES:
+        raise ValueError(f"{DOCS_ENV} must be one of {', '.join(DOCS_MODES)}, got {docs!r}")
+    if brief not in BRIEF_MODES:
+        raise ValueError(f"{BRIEF_ENV} must be one of {', '.join(BRIEF_MODES)}, got {brief!r}")
+    scope = env.get(SCOPE_ENV) or "marts"
+    if scope not in SCOPE_MODES:
+        raise ValueError(f"{SCOPE_ENV} must be one of {', '.join(SCOPE_MODES)}, got {scope!r}")
+    if scope == "raw" and docs != "none":
+        raise ValueError(f"{SCOPE_ENV}=raw needs {DOCS_ENV}=none (the documents describe the marts), got {docs!r}")
+    return {"model": model, "docs": docs, "brief": brief, "scope": scope}
+
+
+def brief_text(mode="full", docs="full", scope="marts"):
+    """agent/BRIEF.md without its marker lines (always removed).
+
+    minimal drops every line inside a rules block. A docs mode other than full drops every line inside a docs block;
+    the docs block of section 2 is replaced by DOCS_REPLACEMENT[docs]. The raw scope drops every line inside a marts
+    block; the n-th marts block of section 2 is replaced by RAW_BRIEF_LINES[n].
+    """
+    if mode not in BRIEF_MODES:
+        raise ValueError(f"unknown brief mode {mode!r}")
+    if docs not in DOCS_MODES:
+        raise ValueError(f"unknown docs mode {docs!r}")
+    if scope not in SCOPE_MODES:
+        raise ValueError(f"unknown scope {scope!r}")
+    drop = {"rules": mode == "minimal", "docs": docs != "full", "marts": scope == "raw"}
+    replacement = {"rules": (), "docs": (DOCS_REPLACEMENT.get(docs),), "marts": RAW_BRIEF_LINES}
+    markers = {RULES_START: ("rules", True), RULES_END: ("rules", False),
+               DOCS_START: ("docs", True), DOCS_END: ("docs", False),
+               MARTS_START: ("marts", True), MARTS_END: ("marts", False)}
+    kept, heading = [], ""
+    inside = dict.fromkeys(drop, False)
+    blocks, in_section_2 = dict.fromkeys(drop, 0), dict.fromkeys(drop, 0)
+    for line in read_allowed(BRIEF).splitlines(keepends=True):
+        if line.startswith("## "):
+            heading = line
+        marker = markers.get(line.strip())
+        if marker:
+            kind, opening = marker
+            if inside[kind] == opening:
+                raise ValueError(f"unbalanced or nested {kind} markers in BRIEF.md")
+            inside[kind] = opening
+            if opening:
+                blocks[kind] += 1
+                if heading.startswith("## 2."):
+                    if drop[kind] and in_section_2[kind] < len(replacement[kind]):
+                        kept.append(replacement[kind][in_section_2[kind]] + "\n")
+                    in_section_2[kind] += 1
+            continue
+        if any(inside[k] and drop[k] for k in drop):
+            continue
+        kept.append(line)
+    if any(inside.values()) or not blocks["rules"] or in_section_2["docs"] != 1 \
+            or in_section_2["marts"] != len(RAW_BRIEF_LINES):
+        raise ValueError(f"BRIEF.md needs balanced markers, a rules block, one docs block and {len(RAW_BRIEF_LINES)} "
+                         "marts blocks in section 2")
+    return "".join(kept)
+
+
+def build_system_prompt(docs="full", brief="full", scope="marts"):
+    if docs not in DOCS_MODES:
+        raise ValueError(f"unknown docs mode {docs!r}")
+    if scope == "raw" and docs != "none":
+        raise ValueError("the raw scope needs docs none")
+    sections = [
         "You are the Olist analyst agent described in the brief below. You answer one question per conversation. "
         "Use the run_sql tool to query the warehouse; every number in your answer must come from a query you ran. "
         "Your final message is the answer itself: a few sentences for a human reader, then the JSON envelope as the "
         "last ```json block, exactly as in the answer format at the end of this prompt.",
-        "# Brief\n\n" + read_allowed(BRIEF).strip(),
-        "# Metric definitions (docs/metrics.md)\n\n" + read_allowed(METRICS).strip(),
-        "# Marts (the only tables you can query; unqualified names resolve to the marts schema)\n\n" + marts_docs().strip(),
-        "# Answer format (evals/ANSWER_FORMAT.md)\n\n" + read_allowed(ANSWER_FORMAT).strip(),
-    ])
+        "# Brief\n\n" + brief_text(brief, docs, scope).strip(),
+    ]
+    if docs == "full":
+        sections.append("# Metric definitions (docs/metrics.md)\n\n" + read_allowed(METRICS).strip())
+    if docs in ("full", "schema"):
+        sections.append("# Marts (the only tables you can query; unqualified names resolve to the marts schema)\n\n"
+                        + marts_docs().strip())
+    if scope == "raw":
+        sections.append(RAW_SCOPE_LINE)
+    sections.append("# Answer format (evals/ANSWER_FORMAT.md)\n\n" + read_allowed(ANSWER_FORMAT).strip())
+    return "\n\n".join(sections)
 
 
 def build_user_message(payload):
@@ -201,7 +314,8 @@ def _add_usage(usage, u):
     usage["output_tokens"] += getattr(u, "output_tokens", 0) or 0
 
 
-def run(payload, client, sandbox, usage, sleep=time.sleep, system=None, trace=None):
+def run(payload, client, sandbox, usage, sleep=time.sleep, system=None, trace=None, model=MODEL,
+        tool=sandbox_mod.TOOL):
     """Return the final response text. Updates usage in place, so it is complete even when this raises."""
     trace = trace or NoTrace()
     system = system if system is not None else build_system_prompt()
@@ -209,8 +323,8 @@ def run(payload, client, sandbox, usage, sleep=time.sleep, system=None, trace=No
     tool_choice = {"type": "auto"}
     for turn in range(1, MAX_TURNS + 1):
         response = call_with_retry(
-            client, sleep, model=MODEL, max_tokens=MAX_TOKENS, system=system, messages=messages,
-            tools=[sandbox_mod.TOOL], tool_choice=tool_choice, cache_control={"type": "ephemeral"})
+            client, sleep, model=model, max_tokens=MAX_TOKENS, system=system, messages=messages,
+            tools=[tool], tool_choice=tool_choice, cache_control={"type": "ephemeral"})
         _add_usage(usage, response.usage)
         messages.append({"role": "assistant", "content": response.content})
         for block in response.content:
@@ -269,6 +383,7 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
     stdin, stdout, stderr = stdin or sys.stdin, stdout or sys.stdout, stderr or sys.stderr
     env = os.environ if env is None else env
     usage = {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0}
+    config = dict.fromkeys(("model", "docs", "brief", "scope"))  # all null until read
     sandbox, trace = None, NoTrace()
     try:
         try:
@@ -277,6 +392,11 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
                 raise ValueError("need an object with question and answer_schema")
         except ValueError as exc:
             print(f"analyst: bad input: {exc}", file=stderr)
+            return 2
+        try:
+            config = read_config(env)
+        except ValueError as exc:
+            print(f"analyst: bad config: {exc}", file=stderr)
             return 2
         api_key = env.get(KEY_ENV)
         if not api_key:
@@ -290,8 +410,10 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
                 return 2
         try:
             client = (client_factory or _default_client)(api_key)
-            sandbox = (sandbox_factory or sandbox_mod.Sandbox)()
-            text = run(payload, client, sandbox, usage, sleep=sleep, trace=trace)
+            sandbox = (sandbox_factory or sandbox_mod.Sandbox)(scope=config["scope"])
+            system = build_system_prompt(config["docs"], config["brief"], config["scope"])
+            text = run(payload, client, sandbox, usage, sleep=sleep, system=system, trace=trace,
+                       model=config["model"], tool=sandbox_mod.tool_for(config["scope"]))
         except AgentError as exc:
             print(f"analyst: {exc}", file=stderr)
             trace.event("error", message=str(exc))
@@ -307,7 +429,7 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
         if sandbox is not None:
             sandbox.close()
         trace.close()
-        print("USAGE " + json.dumps(usage), file=stderr)
+        print("USAGE " + json.dumps({**usage, **config}), file=stderr)
         stderr.flush()
 
 

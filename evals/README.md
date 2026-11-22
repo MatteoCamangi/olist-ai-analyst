@@ -116,10 +116,48 @@ For each question the runner starts `--agent-cmd` in a fresh process, writes one
 `{"question": ..., "answer_schema": ...}` to its stdin and reads the response text from stdout. Nothing else from
 `questions.yaml` is passed. A crash (non-zero exit), a timeout (`--timeout`, default 300 seconds) or empty output is
 graded `format_error` with reason `agent failed: ...`. `--questions` takes a subset of dev questions only.
+If every question failed before reaching the model (non-zero exit or empty output, with zero tokens or no USAGE line;
+timeouts excluded), the runner prints a warning with the failure reasons and the agent's last stderr line, saves no
+summary or detail file and exits 3. A run where some questions succeed is saved as usual.
 
 Each run writes `evals/runs/<UTC timestamp>_<split>_<label>.json` (timestamp, split, label, git sha and dirty flag,
-agent command, number of questions, counts and rates per split) and `evals/runs/detail/<same name>.json` (per-question
-results and raw responses). Commit the summaries; the detail folder is gitignored.
+agent command, number of questions, counts and rates per split, usage totals and `agent_config`) and
+`evals/runs/detail/<same name>.json` (per-question results and raw responses). Commit the summaries; the detail
+folder is gitignored.
+
+**Agent configuration (ablations).** `agent/analyst.py` reads four environment variables, so the same code can run
+with parts removed. Unset or empty means the default, which is the v1 agent (the same prompt, byte for byte, and model):
+
+| Variable | Values | Effect |
+|---|---|---|
+| `ANALYST_MODEL` | model id starting with `claude-` (default `claude-sonnet-5-5`) | the model called |
+| `ANALYST_DOCS` | `full` (default), `schema`, `none` | `full`: docs/metrics.md and the marts yml docs. `schema`: the marts yml model and column descriptions only (doc() blocks resolved), no docs/metrics.md. `none`: no documents; the agent finds tables through information_schema |
+| `ANALYST_BRIEF` | `full` (default), `minimal` | `minimal` drops the rules between the `<!-- rules:start -->` / `<!-- rules:end -->` markers of agent/BRIEF.md (section 4); role, tool, limits and the answer-format instruction stay |
+| `ANALYST_SCOPE` | `marts` (default), `raw` | `raw`: the sandbox reads only the raw schema (the source tables as loaded, unqualified names resolve there) and information_schema; marts, staging and intermediate are rejected. The run_sql description names the raw schema, the prompt says the raw tables are discovered with information_schema, and the brief lines between `<!-- marts:start -->` / `<!-- marts:end -->` are replaced by one line. Requires `ANALYST_DOCS=none` (the documents describe the marts) |
+
+With `ANALYST_DOCS` other than `full`, the brief lines between `<!-- docs:start -->` / `<!-- docs:end -->` (the
+documents line of section 2 and the relative-dates rule) are dropped and section 2 gets a one-line replacement.
+Marker lines never reach the prompt.
+
+**Metadata and model SQL.** In both scopes the SQL of the models is not readable: information_schema.views,
+`duckdb_views()`, `duckdb_tables()` and the sqlite/pg catalog tables are rejected with "The SQL of the models is not
+readable." Of information_schema only `tables` and `columns` can be read. In the raw scope every reference to them is
+rewritten to a subquery filtered to the raw schema, so the marts, staging and intermediate tables do not appear
+(a column qualified as `information_schema.tables.<col>` then fails). **Before commit "Hide model SQL" (the one that
+added this paragraph), the SQL of the staging and intermediate views was readable through information_schema.views
+in both scopes**, so runs recorded earlier had that access, and information_schema in the raw scope listed every
+schema.
+
+evals/ANSWER_FORMAT.md is in the prompt in every mode, and the agent's allowed-documents list does not change. An
+invalid value exits 2 before any API call. The agent writes the configuration in its USAGE line
+(`"model"`, `"docs"`, `"brief"`, `"scope"`); the runner reads it from the first question and stores one `agent_config` object in
+the summary (null with `--responses-dir` or an agent that does not report it). Label runs after the ablation:
+
+```
+ANALYST_DOCS=schema python evals/run_eval.py --split dev --label docs-schema --agent-cmd "python agent/analyst.py"
+ANALYST_DOCS=none ANALYST_BRIEF=minimal python evals/run_eval.py --split dev --label bare --agent-cmd "python agent/analyst.py"
+ANALYST_SCOPE=raw ANALYST_DOCS=none python evals/run_eval.py --split dev --label raw --agent-cmd "python agent/analyst.py"
+```
 
 **Hidden runs.** `--split hidden` and `--split all` are refused without `--confirm-hidden`. For these splits the
 console and the summary hold rates only: no question ids, outcomes or reasons, so failures cannot be tuned against.

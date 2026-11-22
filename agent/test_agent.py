@@ -190,7 +190,7 @@ class FakeClient:
         self.calls.append({"tool_choice": kwargs["tool_choice"], "n_messages": len(kwargs["messages"]),
                            "last": kwargs["messages"][-1], "model": kwargs["model"], "system": kwargs["system"],
                            "first": kwargs["messages"][0], "max_tokens": kwargs["max_tokens"],
-                           "cache_control": kwargs.get("cache_control")})
+                           "cache_control": kwargs.get("cache_control"), "tools": kwargs["tools"]})
         i = len(self.calls) - 1
         return FakeStream(lambda: self.script(i, kwargs))
 
@@ -203,15 +203,22 @@ def run_main(client, env=None, payload=PAYLOAD, sleeps=None):
     out, err = io.StringIO(), io.StringIO()
     code = analyst.main(stdin=io.StringIO(json.dumps(payload)), stdout=out, stderr=err,
                         env={analyst.KEY_ENV: "sk-test-secret-123"} if env is None else env,
-                        client_factory=lambda key: client, sandbox_factory=lambda: sandbox.Sandbox(timeout=5),
+                        client_factory=lambda key: client, sandbox_factory=lambda scope="marts": sandbox.Sandbox(timeout=5, scope=scope),
                         sleep=(sleeps.append if sleeps is not None else (lambda s: None)))
     return code, out.getvalue(), err.getvalue()
 
 
-def usage_line(err):
+CONFIG_KEYS = ("model", "docs", "brief", "scope")
+DEFAULT_CONFIG = {"model": "claude-sonnet-5-5", "docs": "full", "brief": "full", "scope": "marts"}
+
+
+def usage_line(err, config=False):
+    """The counts of the single USAGE line (it must also hold the config keys); with config=True, the config."""
     lines = [ln for ln in err.splitlines() if ln.startswith("USAGE ")]
     assert len(lines) == 1 and err.rstrip().endswith(lines[0]), f"USAGE line: {err!r}"
-    return json.loads(lines[0][len("USAGE "):])
+    data = json.loads(lines[0][len("USAGE "):])
+    assert set(data) == {"input_tokens", "output_tokens", "tool_calls", *CONFIG_KEYS}, data
+    return {k: data[k] for k in (CONFIG_KEYS if config else ("input_tokens", "output_tokens", "tool_calls"))}
 
 
 def test_one_tool_call_then_answer():
@@ -510,6 +517,464 @@ def test_system_prompt():
     assert "{{" not in system and "doc(" not in system and "{% docs" not in system
     assert "The JSON envelope" in system and "Revenue means item price" in system
     assert system == analyst.build_system_prompt(), "prompt must be deterministic for caching"
+
+
+MARKERS = ("<!-- rules:start -->", "<!-- rules:end -->", "<!-- docs:start -->", "<!-- docs:end -->",
+           "<!-- marts:start -->", "<!-- marts:end -->")
+SCHEMA_LINE = "You know the table and column descriptions of the marts."
+NONE_LINE = "You have no documents; discover tables and columns with information_schema."
+
+
+def all_prompts():
+    """Marts scope (the default), every docs x brief combination."""
+    return {(d, b): analyst.build_system_prompt(d, b) for d in analyst.DOCS_MODES for b in analyst.BRIEF_MODES}
+
+
+def raw_prompts():
+    """Raw scope: docs is always none, so one prompt per brief mode."""
+    return {b: analyst.build_system_prompt("none", b, "raw") for b in analyst.BRIEF_MODES}
+
+
+def old_build_system_prompt():
+    """A literal copy of the prompt formula before ablations; the brief is BRIEF.md without its marker lines."""
+    brief = "".join(ln for ln in (ROOT / analyst.BRIEF).read_text().splitlines(keepends=True)
+                    if ln.strip() not in MARKERS)
+    return "\n\n".join([
+        "You are the Olist analyst agent described in the brief below. You answer one question per conversation. "
+        "Use the run_sql tool to query the warehouse; every number in your answer must come from a query you ran. "
+        "Your final message is the answer itself: a few sentences for a human reader, then the JSON envelope as the "
+        "last ```json block, exactly as in the answer format at the end of this prompt.",
+        "# Brief\n\n" + brief.strip(),
+        "# Metric definitions (docs/metrics.md)\n\n" + (ROOT / analyst.METRICS).read_text().strip(),
+        "# Marts (the only tables you can query; unqualified names resolve to the marts schema)\n\n"
+        + analyst.marts_docs().strip(),
+        "# Answer format (evals/ANSWER_FORMAT.md)\n\n" + (ROOT / analyst.ANSWER_FORMAT).read_text().strip(),
+    ])
+
+
+def answer_once():
+    return FakeClient(lambda i, kw: SimpleNamespace(stop_reason="end_turn", usage=usage(), content=[text_block(ANSWER)]))
+
+
+def metrics_lines():
+    lines = [ln.strip() for ln in (ROOT / analyst.METRICS).read_text().splitlines() if len(ln.strip()) >= 30]
+    assert len(lines) > 50, len(lines)
+    return lines
+
+
+def marts_doc_texts():
+    """Model headings and every model or column description of the marts docs, doc() blocks resolved."""
+    texts = []
+    for ln in analyst.marts_docs().splitlines():
+        ln = ln.strip()
+        if ln.startswith("- `"):
+            ln = ln.split("`: ", 1)[1]
+        if len(ln) >= 20:
+            texts.append(ln)
+    assert len(texts) > 50, len(texts)
+    return texts
+
+
+def answer_format_text():
+    return (ROOT / analyst.ANSWER_FORMAT).read_text().strip()
+
+
+def test_default_prompt_unchanged():
+    expected = old_build_system_prompt()
+    assert analyst.build_system_prompt() == expected
+    assert analyst.build_system_prompt("full", "full") == expected
+    assert analyst.RULES_START not in expected and analyst.RULES_END not in expected and "<!--" not in expected
+    for env in ({}, {analyst.MODEL_ENV: "", analyst.DOCS_ENV: "", analyst.BRIEF_ENV: ""}):
+        client = answer_once()
+        code, _, err = run_main(client, env={analyst.KEY_ENV: "sk-test-secret-123", **env})
+        assert code == 0, err
+        assert client.calls[0]["system"] == expected, "main sends a different default prompt"
+        assert client.calls[0]["model"] == "claude-sonnet-5-5"
+        assert usage_line(err, config=True) == DEFAULT_CONFIG
+
+
+def test_schema_mode_has_no_metrics_text():
+    system = analyst.build_system_prompt("schema")
+    hits = [ln for ln in metrics_lines() if ln in system]
+    assert not hits, hits[:3]
+    assert "# Metric definitions" not in system
+    missing = [t for t in marts_doc_texts() if t not in system]
+    assert not missing, missing[:3]
+    for mart in ("fct_orders", "fct_order_items", "fct_order_sellers", "dim_customers", "dim_products"):
+        assert f"### marts.{mart}" in system, mart
+    assert "{{" not in system and "doc(" not in system
+    assert answer_format_text() in system and "Revenue means item price" in system
+
+
+def test_none_mode_has_no_document_text():
+    system = analyst.build_system_prompt("none")
+    hits = [ln for ln in metrics_lines() if ln in system]
+    assert not hits, hits[:3]
+    hits = [t for t in marts_doc_texts() if t in system]
+    assert not hits, hits[:3]
+    for body in analyst.doc_blocks().values():
+        assert body not in system, body[:80]
+    assert "### marts." not in system and "# Marts" not in system and "# Metric definitions" not in system
+    assert answer_format_text() in system and "# Brief" in system
+    assert system == "\n\n".join([system.split("\n\n# Brief")[0], "# Brief\n\n" + analyst.brief_text("full", "none").strip(),
+                                   "# Answer format (evals/ANSWER_FORMAT.md)\n\n" + answer_format_text()])
+
+
+def test_minimal_brief_drops_rules():
+    full, minimal = analyst.brief_text("full"), analyst.brief_text("minimal")
+    rules = full.split("## 4. Rules\n", 1)[1].split("\n## 5.", 1)[0]
+    kept = "- Follow evals/ANSWER_FORMAT.md exactly. The JSON envelope is the last thing in the response."
+    dropped = [ln for ln in rules.splitlines() if ln.strip() and ln != kept]
+    assert len(dropped) >= 10, dropped
+    for docs in analyst.DOCS_MODES:
+        system = analyst.build_system_prompt(docs, "minimal")
+        brief = system.split("# Brief\n\n", 1)[1].split("\n\n# ", 1)[0]
+        assert brief == analyst.brief_text("minimal", docs).strip()
+        hits = [ln for ln in dropped if ln in brief]
+        assert not hits, hits
+        assert kept in brief and "<!--" not in brief
+        for heading in ("## 1. Role", "## 2. What it knows", "## 3. What it can do", "## 4. Rules", "## 5."):
+            assert heading in brief, heading
+        assert "One tool for v1: run_sql" in brief and "Limits: 10 queries per question" in brief
+        assert "in the format of evals/ANSWER_FORMAT.md" in brief
+    assert "Revenue means item price" not in minimal and "Revenue means item price" in full
+
+
+def test_env_config_reaches_api():
+    def script(i, kw):
+        if i == 0:
+            return SimpleNamespace(stop_reason="tool_use", usage=usage(),
+                                   content=[tool_block(1, "SELECT count(*) AS n FROM fct_orders")])
+        return SimpleNamespace(stop_reason="end_turn", usage=usage(), content=[text_block(ANSWER)])
+    client = FakeClient(script)
+    env = {analyst.KEY_ENV: "sk-test-secret-123", analyst.MODEL_ENV: "claude-test-x",
+           analyst.DOCS_ENV: "none", analyst.BRIEF_ENV: "minimal"}
+    code, _, err = run_main(client, env=env)
+    assert code == 0, err
+    assert [c["model"] for c in client.calls] == ["claude-test-x"] * 2
+    assert all(c["system"] == analyst.build_system_prompt("none", "minimal") for c in client.calls)
+    assert all(NONE_LINE in c["system"] and "docs/metrics.md" not in c["system"] for c in client.calls)
+    assert usage_line(err, config=True) == {"model": "claude-test-x", "docs": "none", "brief": "minimal",
+                                               "scope": "marts"}
+    assert usage_line(err) == {"input_tokens": 200, "output_tokens": 20, "tool_calls": 1}
+
+
+def test_invalid_config_exits_2():
+    bad = [{analyst.MODEL_ENV: "gpt-4"}, {analyst.MODEL_ENV: "claude-"}, {analyst.MODEL_ENV: "claude sonnet"},
+           {analyst.MODEL_ENV: "my-claude-model"}, {analyst.DOCS_ENV: "bogus"}, {analyst.DOCS_ENV: "FULL"},
+           {analyst.BRIEF_ENV: "bogus"}]
+    for env in bad:
+        client = FakeClient(None)
+        code, out, err = run_main(client, env={analyst.KEY_ENV: "sk-test-secret-123", **env})
+        assert code == 2 and not client.calls and not out, (env, code, err)
+        assert "bad config" in err and next(iter(env)) in err, err
+        assert usage_line(err, config=True) == dict.fromkeys(CONFIG_KEYS), err
+        assert usage_line(err) == {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0}
+
+
+def test_markers_never_in_prompt():
+    assert (analyst.RULES_START, analyst.RULES_END, analyst.DOCS_START, analyst.DOCS_END,
+            analyst.MARTS_START, analyst.MARTS_END) == MARKERS
+    brief_md = (ROOT / analyst.BRIEF).read_text()
+    assert all(m in brief_md for m in MARKERS), "BRIEF.md lost a marker"
+    for key, system in [*all_prompts().items(), *raw_prompts().items()]:
+        hits = [m for m in MARKERS if m in system]
+        assert not hits and "<!--" not in system and "-->" not in system, (key, hits)
+
+
+def test_full_docs_prompt_matches_previous_default():
+    prompts = all_prompts()
+    old = old_build_system_prompt()
+    assert prompts[("full", "full")] == old
+    assert SCHEMA_LINE not in old and NONE_LINE not in old
+    assert "- docs/metrics.md (metric definitions) and the dbt model docs for the marts." in old
+    assert "window rules defined in\n  docs/metrics.md. Never use the current date." in old
+    # full + minimal: the old prompt with exactly the rules lines removed (docs markers change nothing)
+    rules = [ln for block in (ROOT / analyst.BRIEF).read_text().split(analyst.RULES_START)[1:]
+             for ln in block.split(analyst.RULES_END)[0].splitlines() if ln.strip() and ln.strip() not in MARKERS]
+    expected = old
+    for ln in rules:
+        assert expected.count(ln + "\n") == 1, ln
+        expected = expected.replace(ln + "\n", "", 1)
+    assert prompts[("full", "minimal")] == expected
+
+
+def test_ablated_prompts_do_not_mention_metrics_doc():
+    for (docs, brief), system in all_prompts().items():
+        if docs == "full":
+            continue
+        assert "docs/metrics.md" not in system, (docs, brief)
+        assert "dbt model docs" not in system and "window rules defined in" not in system, (docs, brief)
+        if docs == "none":
+            assert "metrics.md" not in system, (docs, brief)
+
+
+def test_docs_replacement_lines():
+    for (docs, brief), system in all_prompts().items():
+        section_2 = system.split("## 2. What it knows\n", 1)[1].split("\n## 3.", 1)[0]
+        lines = section_2.splitlines()
+        want = {"full": None, "schema": SCHEMA_LINE, "none": NONE_LINE}[docs]
+        for line in (SCHEMA_LINE, NONE_LINE):
+            assert system.count(line) == (1 if line == want else 0), (docs, brief, line)
+        if want:
+            assert lines[0] == "- " + want, (docs, brief, lines[0])
+        else:
+            assert lines[0].startswith("- docs/metrics.md"), (docs, brief)
+
+
+def test_brief_markers_validated():
+    original = analyst.read_allowed
+    good = (ROOT / analyst.BRIEF).read_text()
+    broken = {
+        "docs end dropped": good.replace(analyst.DOCS_END + "\n", "", 1),
+        "docs start dropped": good.replace(analyst.DOCS_START + "\n", "", 1),
+        "no docs in section 2": good.replace("## 2. What it knows", "## 2b What it knows"),
+        "rules end dropped": good.replace(analyst.RULES_END + "\n", "", 1),
+        "marts end dropped": good.replace(analyst.MARTS_END + "\n", "", 1),
+        "marts start dropped": good.replace(analyst.MARTS_START + "\n", "", 1),
+        "one marts block fewer in section 2": good.replace(analyst.MARTS_START + "\n", "", 1).replace(
+            analyst.MARTS_END + "\n", "", 1),
+    }
+    try:
+        for label, text in broken.items():
+            assert text != good, label
+            analyst.read_allowed = lambda rel, t=text: t if rel == analyst.BRIEF else original(rel)
+            for docs in analyst.DOCS_MODES:
+                try:
+                    analyst.brief_text("full", docs)
+                except ValueError:
+                    continue
+                raise AssertionError(f"{label}: accepted with docs={docs}")
+    finally:
+        analyst.read_allowed = original
+
+
+# -- scope (marts | raw) ----------------------------------------------------------------------------------
+
+RAW_REJECTED = ("SELECT * FROM marts.fct_orders", "SELECT count(*) FROM fct_orders",
+                "SELECT * FROM staging.stg_orders", "SELECT * FROM intermediate.int_orders_enriched",
+                "SELECT * FROM orders o JOIN marts.fct_orders f USING (order_id)",
+                "WITH x AS (SELECT * FROM marts.dim_products) SELECT * FROM x")
+
+
+def test_raw_scope_sandbox():
+    raw = sandbox.Sandbox(timeout=5, scope="raw")
+    try:
+        assert raw.schema == "raw" and "orders" in raw.tables and "fct_orders" not in raw.tables
+        for sql in ("SELECT count(*) AS n FROM raw.orders", "SELECT count(*) AS n FROM orders",
+                    'SELECT count(*) AS n FROM "RAW"."ORDERS"', "SELECT count(*) AS n FROM warehouse.raw.orders"):
+            out = raw.run_sql(sql)
+            assert out.startswith("n\n99441"), (sql, out[:200])
+        out = raw.run_sql("SELECT count(*) AS n FROM information_schema.tables WHERE table_schema = 'raw'")
+        assert out.startswith("n\n9"), out
+        for sql in RAW_REJECTED:
+            out = raw.run_sql(sql)
+            assert is_error(out) and "raw schema" in out and "marts schema" not in out, (sql, out[:300])
+        for sql in ("CREATE TABLE raw.t AS SELECT 1 AS a", "INSERT INTO orders SELECT * FROM orders LIMIT 1",
+                    "COPY (SELECT * FROM orders) TO 'out.csv'", "ATTACH 'other.duckdb' AS other",
+                    "SELECT * FROM read_csv('data/raw/olist_orders_dataset.csv')", "SELECT 1; DROP TABLE orders",
+                    "SET enable_external_access = true", "SELECT * FROM range(10)"):
+            assert is_error(raw.run_sql(sql)), sql
+        assert raw.max_rows == sandbox.MAX_ROWS and raw.run_sql("SELECT * FROM orders").splitlines()[-1].startswith("(truncated: showing the first 50")
+    finally:
+        raw.close()
+    con = sandbox.connect(schema="raw")  # layer 1 alone, raw as default schema
+    try:
+        assert con.execute("SELECT count(*) FROM orders").fetchone()[0] == 99441
+        for sql in ("SELECT * FROM read_csv('data/raw/olist_orders_dataset.csv')", "CREATE TABLE t (a INTEGER)",
+                    "INSERT INTO orders SELECT * FROM orders LIMIT 1", "SET enable_external_access = true"):
+            try:
+                con.execute(sql).fetchall()
+            except duckdb.Error:
+                continue
+            raise AssertionError(f"raw connection accepted: {sql}")
+    finally:
+        con.close()
+    assert not (ROOT / "out.csv").exists() and not (ROOT / "other.duckdb").exists()
+
+
+def test_marts_scope_rejects_raw_as_before():
+    default, marts = sandbox.Sandbox(timeout=5), sandbox.Sandbox(timeout=5, scope="marts")
+    try:
+        assert default.schema == marts.schema == "marts"
+        for sql in ("SELECT * FROM raw.orders", "SELECT * FROM orders", "SELECT * FROM staging.stg_orders"):
+            a, b = default.run_sql(sql), marts.run_sql(sql)
+            assert a == b and is_error(a) and sandbox._ALLOWED_TEXT in a, (sql, a)
+        assert "Marts: dim_customers" in default.run_sql("SELECT * FROM orders")
+        assert default.run_sql("SELECT count(*) AS n FROM fct_orders").startswith("n\n99441")
+    finally:
+        default.close()
+        marts.close()
+    assert sandbox.tool_for("marts") is sandbox.TOOL
+    raw_tool = sandbox.tool_for("raw")
+    assert "mart" not in raw_tool["description"].lower() and "raw schema" in raw_tool["description"]
+    assert {k: v for k, v in raw_tool.items() if k != "description"} == \
+        {k: v for k, v in sandbox.TOOL.items() if k != "description"}
+
+
+def test_raw_prompt_has_no_marts_text():
+    for brief, system in raw_prompts().items():
+        low = system.lower()
+        assert "mart" not in low and "fct_" not in low and "dim_" not in low, brief
+        assert "docs/metrics.md" not in system and "metrics.md" not in system, brief
+        assert system.count(analyst.RAW_SCOPE_LINE) == 1, brief
+        assert system.index(analyst.RAW_SCOPE_LINE) < system.index("# Answer format"), brief
+        section_2 = system.split("## 2. What it knows\n", 1)[1].split("\n## 3.", 1)[0].splitlines()
+        assert section_2[:2] == [analyst.DOCS_REPLACEMENT["none"], analyst.RAW_BRIEF_LINE], section_2
+        assert system.count(analyst.RAW_BRIEF_LINE) == 1
+        assert "Pick the mart" not in system and answer_format_text() in system
+    for docs in ("full", "schema"):
+        try:
+            analyst.build_system_prompt(docs, "full", "raw")
+        except ValueError:
+            continue
+        raise AssertionError(f"raw scope accepted docs={docs}")
+    for docs in analyst.DOCS_MODES:  # marts scope: no raw lines anywhere
+        system = analyst.build_system_prompt(docs, "full", "marts")
+        assert analyst.RAW_SCOPE_LINE not in system and analyst.RAW_BRIEF_LINE not in system
+
+
+def test_marts_scope_prompt_is_previous_default():
+    old = old_build_system_prompt()
+    assert analyst.build_system_prompt("full", "full", "marts") == old
+    client = answer_once()
+    code, _, err = run_main(client, env={analyst.KEY_ENV: "sk-test-secret-123", analyst.SCOPE_ENV: "marts"})
+    assert code == 0, err
+    assert client.calls[0]["system"] == old and client.calls[0]["tools"] == [sandbox.TOOL]
+    assert usage_line(err, config=True) == DEFAULT_CONFIG
+
+
+def test_raw_scope_end_to_end():
+    def script(i, kw):
+        if i == 0:
+            return SimpleNamespace(stop_reason="tool_use", usage=usage(), content=[
+                tool_block(1, "SELECT count(*) AS n FROM raw.orders"),
+                tool_block(2, "SELECT count(*) AS n FROM marts.fct_orders")])
+        ok_result, rejected = kw["messages"][-1]["content"][:2]
+        assert ok_result["content"].startswith("n\n99441") and not ok_result["is_error"], ok_result
+        assert rejected["is_error"] and "raw schema" in rejected["content"], rejected
+        return SimpleNamespace(stop_reason="end_turn", usage=usage(), content=[text_block(ANSWER)])
+    client = FakeClient(script)
+    env = {analyst.KEY_ENV: "sk-test-secret-123", analyst.SCOPE_ENV: "raw", analyst.DOCS_ENV: "none"}
+    code, out, err = run_main(client, env=env)
+    assert code == 0, err
+    assert out.strip() == ANSWER and len(client.calls) == 2
+    assert all(c["system"] == analyst.build_system_prompt("none", "full", "raw") for c in client.calls)
+    assert all(c["tools"] == [sandbox.RAW_TOOL] for c in client.calls)
+    assert usage_line(err, config=True) == {**DEFAULT_CONFIG, "docs": "none", "scope": "raw"}
+    assert usage_line(err)["tool_calls"] == 2
+
+
+def test_raw_scope_config_rules():
+    for env in ({analyst.SCOPE_ENV: "bogus"}, {analyst.SCOPE_ENV: "RAW", analyst.DOCS_ENV: "none"},
+                {analyst.SCOPE_ENV: "raw"}, {analyst.SCOPE_ENV: "raw", analyst.DOCS_ENV: "full"},
+                {analyst.SCOPE_ENV: "raw", analyst.DOCS_ENV: "schema"}):
+        client = FakeClient(None)
+        code, out, err = run_main(client, env={analyst.KEY_ENV: "sk-test-secret-123", **env})
+        assert code == 2 and not client.calls and not out, (env, err)
+        assert "bad config" in err and analyst.SCOPE_ENV in err, err
+        assert usage_line(err, config=True) == dict.fromkeys(CONFIG_KEYS)
+
+
+# -- model SQL and metadata --------------------------------------------------------------------------------
+
+MODEL_SQL_QUERIES = (
+    "SELECT table_name, view_definition FROM information_schema.views",
+    'SELECT * FROM "INFORMATION_SCHEMA"."VIEWS"',
+    "SELECT * FROM Information_Schema.Views WHERE table_schema = 'intermediate'",
+    "SELECT * FROM warehouse.information_schema.views",
+    "WITH v AS (SELECT * FROM information_schema.views) SELECT view_definition FROM v",
+    "SELECT * FROM (SELECT view_definition FROM information_schema.views) x",
+    "SELECT t.table_name FROM information_schema.tables t JOIN information_schema.views v USING (table_name)",
+    "SELECT sql FROM duckdb_views()",
+    "SELECT sql FROM main.duckdb_views()",
+    "SELECT * FROM duckdb_views",
+    "SELECT sql FROM duckdb_tables()",
+    "SELECT sql FROM sqlite_master",
+    "SELECT sql FROM sqlite_schema",
+    "SELECT sql FROM main.sqlite_master",
+    "SELECT * FROM sqlite_temp_master",
+    "SELECT definition FROM pg_catalog.pg_views",
+    "SELECT * FROM pg_views",
+)
+
+
+def scoped(scope):
+    return sandbox.Sandbox(timeout=5, scope=scope)
+
+
+def test_model_sql_rejected_both_scopes():
+    for scope in ("marts", "raw"):
+        sb_ = scoped(scope)
+        try:
+            for sql in MODEL_SQL_QUERIES:
+                out = sb_.run_sql(sql)
+                assert out == "ERROR: The SQL of the models is not readable.", (scope, sql, out[:200])
+        finally:
+            sb_.close()
+    assert "CREATE VIEW" not in "".join(sb().run_sql(q) for q in MODEL_SQL_QUERIES).upper()
+
+
+def test_information_schema_allowlist():
+    for scope in ("marts", "raw"):
+        sb_ = scoped(scope)
+        try:
+            for sql in ("SELECT table_schema, table_name FROM information_schema.tables",
+                        "SELECT table_name, column_name, data_type FROM information_schema.columns"):
+                assert not is_error(sb_.run_sql(sql)), (scope, sql)
+            for name in ("schemata", "table_constraints", "key_column_usage", "check_constraints", "character_sets"):
+                out = sb_.run_sql(f"SELECT * FROM information_schema.{name}")
+                assert is_error(out) and "information_schema.tables and information_schema.columns" in out, (scope, out)
+        finally:
+            sb_.close()
+
+
+def test_raw_scope_metadata_filtered():
+    raw, marts = scoped("raw"), scoped("marts")
+    try:
+        assert raw.run_sql("SELECT DISTINCT table_schema FROM information_schema.tables") == \
+            "table_schema\nraw\n(1 row)"
+        assert raw.run_sql("SELECT count(*) AS n FROM information_schema.tables") == "n\n9\n(1 row)"
+        assert raw.run_sql("SELECT DISTINCT table_schema FROM information_schema.columns") == \
+            "table_schema\nraw\n(1 row)"
+        hidden = ("SELECT count(*) AS n FROM information_schema.tables WHERE table_name = 'fct_orders'",
+                  "SELECT count(*) AS n FROM information_schema.columns WHERE column_name = 'is_late'",
+                  "SELECT count(*) AS n FROM information_schema.tables t WHERE t.table_schema IN "
+                  "('marts', 'staging', 'intermediate') OR 1 = 0",
+                  "WITH x AS (SELECT * FROM information_schema.tables) SELECT count(*) AS n FROM x "
+                  "WHERE table_schema <> 'raw'",
+                  "SELECT count(*) AS n FROM information_schema.columns c JOIN information_schema.tables t "
+                  "ON c.table_name = t.table_name WHERE t.table_schema = 'marts'",
+                  "SELECT count(*) AS n FROM information_schema.columns WHERE table_name IN "
+                  "(SELECT table_name FROM information_schema.tables WHERE table_schema = 'staging')")
+        for sql in hidden:
+            assert raw.run_sql(sql) == "n\n0\n(1 row)", (sql, raw.run_sql(sql))
+        assert raw.run_sql("SELECT count(*) AS n FROM information_schema.tables t WHERE 1 = 1 OR "
+                           "t.table_schema = 'marts'") == "n\n9\n(1 row)"
+        out = raw.run_sql("SELECT information_schema.tables.table_name FROM information_schema.tables")
+        assert is_error(out), out  # a fully qualified column cannot reach the unfiltered view: fails closed
+        error, run = raw.prepare("SELECT count(*) AS n FROM orders")
+        assert error is None and run == "SELECT count(*) AS n FROM orders"  # data queries run as sent
+        marts_sql = "SELECT table_schema, count(*) AS n FROM information_schema.tables GROUP BY 1 ORDER BY 1"
+        assert marts.prepare(marts_sql) == (None, marts_sql)  # marts scope: verbatim, all schemas visible
+        assert marts.run_sql(marts_sql) == \
+            "table_schema\tn\nintermediate\t3\nmarts\t5\nraw\t9\nstaging\t8\n(4 rows)"
+    finally:
+        raw.close()
+        marts.close()
+
+
+def test_raw_brief_consistent():
+    marts_sentence = "allowed list), the raw tables, or the SQL of the dbt models."
+    raw_line = analyst.RAW_BRIEF_LINES[1]
+    for brief, system in raw_prompts().items():
+        assert "the raw tables" not in system and marts_sentence not in system, brief
+        section_2 = system.split("## 2. What it knows\n", 1)[1].split("\n## 3.", 1)[0].splitlines()
+        assert section_2.count(raw_line) == 1 and system.count(raw_line) == 1, section_2
+        assert "Cannot see anything under evals/" in raw_line and "SQL of the dbt models" in raw_line
+        assert analyst.RAW_SCOPE_LINE in system  # can query raw, and nothing says it cannot
+    for key, system in all_prompts().items():
+        assert marts_sentence in system and raw_line not in system and analyst.RAW_BRIEF_LINE not in system, key
 
 
 def test_user_message_holds_question_and_schema_only():
