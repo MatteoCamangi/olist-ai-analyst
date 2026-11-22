@@ -234,3 +234,4 @@ notebooks/
 
 # Eval run details (per-question results and raw responses)
 evals/runs/detail/
+evals/reviewer/runs/detail/
