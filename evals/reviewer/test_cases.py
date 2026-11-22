@@ -4,6 +4,7 @@ Run from the repo root:  python evals/reviewer/test_cases.py   (or pytest evals/
 Needs no database. Comparisons with the original runs need the local detail files (gitignored) and say when they
 are skipped.
 """
+import hashlib
 import json
 import re
 import sys
@@ -29,7 +30,15 @@ FIELDS = {"id": str, "source_question": str, "split": str, "question": str, "ans
           "edits": (list, type(None)), "expected_verdict": str, "expected_failed_checks": list, "source": dict,
           "note": str}
 SOURCE_FIELDS = {"run", "git_sha", "agent_config", "outcome", "sha256"}
-HEADLINE_WRONG = {"wrong_filter", "threshold_off_by_one"}  # the injected edit changes the headline number
+# the brief's verdict rules applied per fault: reject when the headline becomes wrong or unsupported
+VERDICT_BY_FAULT = {"wrong_filter": "reject", "threshold_off_by_one": "reject", "number_mismatch": "reject",
+                    "false_refusal": "reject", "false_premise_accepted": "reject", "unsupported_claim": "revise",
+                    "invented_cause": "revise", "missing_assumption": "revise", "contradicting_assumption": "revise",
+                    "format_break": "revise"}
+FIRST_17_SHA256 = "66d89b876187d6cc17af17edfc3c65d539bca794a794c2be6c71c19bc2df65f5"  # cases.json at a4fb323
+FIRST_17_IDS = ["q001.ok", "q001.threshold_off_by_one", "q002.ok", "q005.ok", "q010.invented_cause", "q010.ok",
+                "q010.raw-bare", "q013.ok", "q013.wrong_filter", "q014.ok", "q017.ok", "q018.missing_assumption",
+                "q018.ok", "q019.ok", "q019.unsupported_claim", "q020.contradicting_assumption", "q020.ok"]
 SKIPPED = []
 
 
@@ -82,8 +91,9 @@ def detail_items(run):
 # -- tests -----------------------------------------------------------------------------------------------
 
 def test_required_fields_and_values():
-    assert len(CASES) == len(BY_ID) == 17, len(CASES)
-    assert [c["id"] for c in CASES] == sorted(BY_ID), "cases are not sorted by id"
+    assert len(CASES) == len(BY_ID) == 29, len(CASES)
+    ids = [c["id"] for c in CASES]
+    assert ids[:17] == sorted(ids[:17]) and ids[17:] == sorted(ids[17:]), "each batch is sorted by id"
     for c in CASES:
         assert set(c) == set(FIELDS), (c["id"], set(c) ^ set(FIELDS))
         for key, kind in FIELDS.items():
@@ -96,11 +106,54 @@ def test_required_fields_and_values():
         assert injected == (c["fault_type"] is not None) == (c["base_case"] is not None) == bool(c["edits"]), c["id"]
         assert c["response"].strip() and c["note"].strip(), c["id"]
         assert any(e.get("event") == "sql" for e in c["trace"]), c["id"]
-    assert sorted(c["fault_type"] for c in CASES if c["fault_type"]) == sorted(mf.FAULT_TYPES)
+    assert {c["fault_type"] for c in CASES if c["fault_type"]} == set(mf.FAULT_TYPES)
     natural = [c for c in CASES if c["origin"] == "natural"]
     assert sum(c["expected_verdict"] == "approve" for c in natural) == 10
     assert BY_ID["q010.raw-bare"]["expected_verdict"] == "reject"
     assert BY_ID["q010.raw-bare"]["expected_failed_checks"] == ["definitions"]
+
+
+def test_first_17_cases_unchanged():
+    assert [c["id"] for c in CASES[:17]] == FIRST_17_IDS
+    blob = json.dumps(CASES[:17], indent=2, ensure_ascii=False).encode()
+    assert hashlib.sha256(blob).hexdigest() == FIRST_17_SHA256, "the first 17 cases changed"
+    assert CASES_TEXT.startswith(mf.render(CASES[:17])[:-3]), "the first 17 cases are not a prefix of the file"
+
+
+def test_fault_variants():
+    by_type = {}
+    for c in CASES:
+        if c["fault_type"]:
+            by_type.setdefault(c["fault_type"], []).append(c)
+    assert set(by_type) == set(mf.FAULT_TYPES) and len(mf.FAULT_TYPES) == 10
+    variants = {"false_refusal": 1, "false_premise_accepted": 1}  # every other type has two variants
+    for fault, cases in by_type.items():
+        assert len(cases) == variants.get(fault, 2), (fault, len(cases))
+        assert len({c["source_question"] for c in cases}) == len(cases), f"{fault}: two variants on one base"
+    for fault in ("wrong_filter", "threshold_off_by_one", "unsupported_claim", "invented_cause",
+                  "missing_assumption", "contradicting_assumption"):
+        assert sum(c["id"] in FIRST_17_IDS for c in by_type[fault]) == 1, fault
+    silent = BY_ID["q018.wrong_filter"]
+    assumptions = json.loads(silent["response"].split("```json", 1)[1].split("```", 1)[0])["assumptions"]
+    assert any("except canceled" in a for a in assumptions), "silent wrong_filter: assumptions match the SQL"
+    assert not any("delivered" in a.lower() for a in assumptions)
+    assert "delivered" not in silent["question"].lower(), "silent: the question must not name the population"
+
+
+def test_every_brief_check_has_two_cases():
+    brief = (ROOT / "agent" / "REVIEWER_BRIEF.md").read_text()
+    section_3 = brief.split("## 3. Checks", 1)[1].split("\n## 4.", 1)[0]
+    names = re.findall(r"^- ([A-Z][^:]+):", section_3, re.MULTILINE)
+    assert len(names) == len(mf.CHECKS) == 7, names
+    slugs = {"Numbers": "numbers", "Definitions": "definitions", "Grain and population": "grain_population",
+             "Assumptions": "assumptions", "Refusals and false premises": "refusals_false_premises",
+             "Claims beyond the data": "claims_beyond_data", "Format": "format"}
+    assert [slugs[n] for n in names] == list(mf.CHECKS), names
+    for check in mf.CHECKS:
+        n = sum(check in c["expected_failed_checks"] for c in CASES)
+        assert n >= 2, (check, n)
+    counts = {v: sum(c["expected_verdict"] == v for c in CASES) for v in mf.VERDICTS}
+    assert counts == {"approve": 10, "revise": 10, "reject": 9}, counts
 
 
 def test_verdicts_follow_the_brief():
@@ -112,8 +165,7 @@ def test_verdicts_follow_the_brief():
     assert len(mf.CHECKS) == 7
     for c in CASES:
         if c["origin"] == "injected":
-            want = "reject" if c["fault_type"] in HEADLINE_WRONG else "revise"
-            assert c["expected_verdict"] == want, (c["id"], c["expected_verdict"])
+            assert c["expected_verdict"] == VERDICT_BY_FAULT[c["fault_type"]], (c["id"], c["expected_verdict"])
 
 
 def test_dev_only_no_hidden_content():
@@ -173,8 +225,10 @@ def test_injected_cases_differ_only_by_their_edits():
         assert (response, trace) == (c["response"], c["trace"]), f"{c['id']}: not exactly its base plus its edits"
         assert [e.get("event") for e in c["trace"]] == [e.get("event") for e in base["trace"]], c["id"]
         for edit in c["edits"]:
-            if edit["scope"] == "text" and edit["new"]:
+            if edit["scope"] in ("text", "text_all") and edit["new"]:
                 assert edit["new"] in c["response"], (c["id"], edit["new"][:60])
+        final = [e["text"] for e in c["trace"] if e.get("event") == "final"]
+        assert final == [c["response"].rstrip("\n")], f"{c['id']}: final event and response disagree"
         touches_sql = any(e["scope"] == "sql" for e in c["edits"])
         sql = [e["sql"] for e in c["trace"] if e.get("event") == "sql"]
         assert (sql != [e["sql"] for e in base["trace"] if e.get("event") == "sql"]) == touches_sql, c["id"]
