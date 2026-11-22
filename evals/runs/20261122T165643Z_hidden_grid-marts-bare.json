@@ -1,0 +1,45 @@
+{
+  "timestamp": "20261122T165643Z",
+  "split": "hidden",
+  "label": "grid-marts-bare",
+  "git_sha": "f7c4d748413fbc612ed069e78741886c81983ae8",
+  "git_dirty": true,
+  "agent_cmd": "python agent/analyst.py",
+  "responses_dir": null,
+  "timeout": 900.0,
+  "n_questions": 12,
+  "rates": {
+    "hidden": {
+      "questions": 12,
+      "answerable": 10,
+      "correct": 7,
+      "accuracy": 0.5833,
+      "wrong_confident_rate": 0.4167,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.0
+    },
+    "all": {
+      "questions": 12,
+      "answerable": 10,
+      "correct": 7,
+      "accuracy": 0.5833,
+      "wrong_confident_rate": 0.4167,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.0
+    }
+  },
+  "usage": {
+    "input_tokens": 234492,
+    "output_tokens": 37453,
+    "tool_calls": 46
+  },
+  "agent_config": {
+    "model": "claude-sonnet-5-5",
+    "docs": "none",
+    "brief": "minimal",
+    "scope": "marts"
+  },
+  "earlier_hidden_runs": 4
+}
