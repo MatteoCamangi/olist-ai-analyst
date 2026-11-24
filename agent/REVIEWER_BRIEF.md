@@ -41,11 +41,26 @@ Findings: for each one, give
   - fix: what the analyst should change (guidance only, see rules)
 Reason: one line.
 
+Severity:
+- high: the headline answer is wrong or unsupported (wrong definition, wrong
+  population, a headline figure that differs from the query results beyond display
+  rounding, an unjustified refusal, a false premise accepted).
+- medium: the headline is right, but a reader could be misled or cannot verify it:
+  an unsupported claim (including a supporting figure that appears in no query
+  result), a missing or contradicting assumption (an empty assumptions list when the
+  answer relies on a definition counts as medium), or a format violation.
+- low: cosmetic or immaterial; it does not change what a reader would conclude.
+
+Evidence format: each finding's evidence is a query number ("query 2"), ONE short
+quote copied exactly from the inputs (at most about 20 words, no ellipses), or both
+(query 2 and "23.93%"). Put the quote in double quotes, or in backticks when it
+contains double quotes (JSON or SQL). For two quotes, write two findings. Never
+paraphrase in the evidence field; explanations go in fix.
+
 Verdict rules:
 - reject: at least one high finding that makes the headline answer wrong or
   unsupported.
-- revise: no high findings, but medium findings, or a low-severity pattern
-  that a stakeholder could misread.
+- revise: no high findings, at least one medium finding.
 - approve: no findings, or only low ones that do not change the answer.
 
 ## 5. Rules

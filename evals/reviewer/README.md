@@ -256,3 +256,36 @@ per fault type and per check, the expected × got confusion matrix, token totals
 the first case's USAGE line, git sha) and `evals/reviewer/runs/detail/<same name>.json` (gitignored: each case's
 reviewer output, scores, stderr tail and usage). If every case fails before reaching the model (agent failure and zero
 tokens), the runner prints a warning, saves nothing and exits 3.
+
+## Brief v2
+
+agent/REVIEWER_BRIEF.md v2 adds two things to section 4 (Output). The rest of the brief, the checks and the reviewer
+code are unchanged.
+
+- **Severity rubric.** High means the headline answer is wrong or unsupported: a wrong definition or population, a
+  headline figure that differs from the query results beyond display rounding, an unjustified refusal, or a false
+  premise accepted. Medium means the headline is right but a reader could be misled or cannot verify it: an
+  unsupported claim (including a supporting figure that appears in no query result), a missing or contradicting
+  assumption, or a format violation. Low means cosmetic. The revise rule now reads "no high findings, at least one
+  medium finding". Why: v1 had severities with no definitions, so the same fault got different severities and
+  verdicts across runs.
+- **Evidence format.** Evidence is a query number, one short exact quote (about 20 words at most, no ellipses), or
+  both. Quotes go in double quotes, or in backticks when they contain double quotes (JSON, SQL). Paraphrases are not
+  allowed in evidence; explanations go in fix. Why: most v1 evidence failures were quotes the scorer could not match
+  (single quotes, ellipses, quotes joined to commentary) or accurate paraphrases with nothing to check.
+
+**Tuned on dev.** The rule that an empty assumptions list is a medium finding when the answer relies on a definition
+was written after seeing the v1 miss on q013.missing_assumption. Both v1 runs approved it, although one of them
+flagged `assumptions`. v2 is therefore tuned on these dev cases, so its dev score overstates how well it generalises.
+The held-out run is the real test. The v1 summaries (`*_reviewer-v1-sonnet*.json`) stay in `runs/` as the baseline;
+v2 runs use their own label (for example `reviewer-v2-sonnet`).
+
+**Acceptance criteria for v2, decided before any v2 run:**
+
+1. All 9 reject cases are still rejected, in both runs.
+2. 0 false alarms on the 8 approve cases.
+3. q013.missing_assumption now gets revise.
+4. evidence_valid at least as high as the v1 rescored runs (21/23 and 24/25).
+5. No new format errors.
+
+If (1) or (2) fails, v2 is not adopted, and the cause is investigated before anything else is changed.
