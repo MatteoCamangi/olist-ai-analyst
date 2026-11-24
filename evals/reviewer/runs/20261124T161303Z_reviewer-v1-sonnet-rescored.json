@@ -1,0 +1,720 @@
+{
+  "timestamp": "20261124T161303Z",
+  "label": "reviewer-v1-sonnet-rescored",
+  "scorer_version": 2,
+  "git_sha": "0e1fcdd01e4f2ba4df15eaf99c4c7b9684c4e9c2",
+  "git_dirty": false,
+  "agent_cmd": "python agent/reviewer.py",
+  "cases_file": "/workspaces/olist-ai-analyst/evals/reviewer/cases.json",
+  "only": null,
+  "agent_config": {
+    "model": "claude-sonnet-5-5"
+  },
+  "rescored_from": "20261122T192400Z_reviewer-v1-sonnet.json",
+  "original_timestamp": "20261122T192400Z",
+  "original_git_sha": "5cca3695e506d989d651fae3c94b13f00be914c8",
+  "n_cases": 29,
+  "label_view": "corrected",
+  "label_corrections": [
+    "q001.ok",
+    "q018.ok"
+  ],
+  "metrics": {
+    "verdict_match": {
+      "n": 27,
+      "of": 29,
+      "rate": 0.931
+    },
+    "dangerous_miss": {
+      "n": 2,
+      "of": 21,
+      "rate": 0.0952
+    },
+    "false_alarm": {
+      "n": 0,
+      "of": 8,
+      "rate": 0.0
+    },
+    "soft_miss": {
+      "n": 0,
+      "of": 21,
+      "rate": 0.0
+    },
+    "check_recall": {
+      "n": 20,
+      "of": 21,
+      "rate": 0.9524
+    },
+    "evidence_valid": {
+      "n": 21,
+      "of": 23,
+      "rate": 0.913
+    },
+    "invented_numbers": {
+      "n": 1,
+      "of": 23,
+      "rate": 0.0435
+    },
+    "derived_numbers": {
+      "n": 0,
+      "of": 23,
+      "rate": 0.0
+    },
+    "format_error": {
+      "n": 0,
+      "of": 29,
+      "rate": 0.0
+    },
+    "agent_failure": {
+      "n": 0,
+      "of": 29,
+      "rate": 0.0
+    }
+  },
+  "per_fault_type": {
+    "contradicting_assumption": {
+      "n": 2,
+      "verdict_match": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 2,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      }
+    },
+    "false_premise_accepted": {
+      "n": 1,
+      "verdict_match": {
+        "n": 1,
+        "of": 1,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 1,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 1,
+        "of": 1,
+        "rate": 1.0
+      }
+    },
+    "false_refusal": {
+      "n": 1,
+      "verdict_match": {
+        "n": 1,
+        "of": 1,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 1,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 1,
+        "of": 1,
+        "rate": 1.0
+      }
+    },
+    "format_break": {
+      "n": 2,
+      "verdict_match": {
+        "n": 1,
+        "of": 2,
+        "rate": 0.5
+      },
+      "dangerous_miss": {
+        "n": 1,
+        "of": 2,
+        "rate": 0.5
+      },
+      "check_recall": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      }
+    },
+    "invented_cause": {
+      "n": 2,
+      "verdict_match": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 2,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      }
+    },
+    "missing_assumption": {
+      "n": 2,
+      "verdict_match": {
+        "n": 1,
+        "of": 2,
+        "rate": 0.5
+      },
+      "dangerous_miss": {
+        "n": 1,
+        "of": 2,
+        "rate": 0.5
+      },
+      "check_recall": {
+        "n": 1,
+        "of": 2,
+        "rate": 0.5
+      }
+    },
+    "natural_approve": {
+      "n": 8,
+      "verdict_match": {
+        "n": 8,
+        "of": 8,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 0,
+        "rate": null
+      },
+      "check_recall": {
+        "n": 0,
+        "of": 0,
+        "rate": null
+      }
+    },
+    "natural_reject": {
+      "n": 1,
+      "verdict_match": {
+        "n": 1,
+        "of": 1,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 1,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 1,
+        "of": 1,
+        "rate": 1.0
+      }
+    },
+    "natural_revise": {
+      "n": 2,
+      "verdict_match": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 2,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      }
+    },
+    "number_mismatch": {
+      "n": 2,
+      "verdict_match": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 2,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      }
+    },
+    "threshold_off_by_one": {
+      "n": 2,
+      "verdict_match": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 2,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      }
+    },
+    "unsupported_claim": {
+      "n": 2,
+      "verdict_match": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 2,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      }
+    },
+    "wrong_filter": {
+      "n": 2,
+      "verdict_match": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      },
+      "dangerous_miss": {
+        "n": 0,
+        "of": 2,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 2,
+        "of": 2,
+        "rate": 1.0
+      }
+    }
+  },
+  "per_check": {
+    "numbers": {
+      "expected": 2,
+      "recalled": 2,
+      "flagged": 8,
+      "flagged_on_approve": 0
+    },
+    "definitions": {
+      "expected": 3,
+      "recalled": 3,
+      "flagged": 4,
+      "flagged_on_approve": 1
+    },
+    "grain_population": {
+      "expected": 2,
+      "recalled": 2,
+      "flagged": 4,
+      "flagged_on_approve": 0
+    },
+    "assumptions": {
+      "expected": 5,
+      "recalled": 4,
+      "flagged": 14,
+      "flagged_on_approve": 1
+    },
+    "refusals_false_premises": {
+      "expected": 2,
+      "recalled": 2,
+      "flagged": 2,
+      "flagged_on_approve": 0
+    },
+    "claims_beyond_data": {
+      "expected": 6,
+      "recalled": 6,
+      "flagged": 13,
+      "flagged_on_approve": 0
+    },
+    "format": {
+      "expected": 2,
+      "recalled": 2,
+      "flagged": 4,
+      "flagged_on_approve": 0
+    }
+  },
+  "confusion": {
+    "approve": {
+      "approve": 8,
+      "revise": 0,
+      "reject": 0,
+      "format_error": 0,
+      "agent_failure": 0
+    },
+    "revise": {
+      "approve": 2,
+      "revise": 10,
+      "reject": 0,
+      "format_error": 0,
+      "agent_failure": 0
+    },
+    "reject": {
+      "approve": 0,
+      "revise": 0,
+      "reject": 9,
+      "format_error": 0,
+      "agent_failure": 0
+    }
+  },
+  "original_labels": {
+    "metrics": {
+      "verdict_match": {
+        "n": 25,
+        "of": 29,
+        "rate": 0.8621
+      },
+      "dangerous_miss": {
+        "n": 2,
+        "of": 19,
+        "rate": 0.1053
+      },
+      "false_alarm": {
+        "n": 2,
+        "of": 10,
+        "rate": 0.2
+      },
+      "soft_miss": {
+        "n": 0,
+        "of": 19,
+        "rate": 0.0
+      },
+      "check_recall": {
+        "n": 18,
+        "of": 19,
+        "rate": 0.9474
+      },
+      "evidence_valid": {
+        "n": 21,
+        "of": 23,
+        "rate": 0.913
+      },
+      "invented_numbers": {
+        "n": 1,
+        "of": 23,
+        "rate": 0.0435
+      },
+      "derived_numbers": {
+        "n": 0,
+        "of": 23,
+        "rate": 0.0
+      },
+      "format_error": {
+        "n": 0,
+        "of": 29,
+        "rate": 0.0
+      },
+      "agent_failure": {
+        "n": 0,
+        "of": 29,
+        "rate": 0.0
+      }
+    },
+    "per_fault_type": {
+      "contradicting_assumption": {
+        "n": 2,
+        "verdict_match": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        },
+        "dangerous_miss": {
+          "n": 0,
+          "of": 2,
+          "rate": 0.0
+        },
+        "check_recall": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        }
+      },
+      "false_premise_accepted": {
+        "n": 1,
+        "verdict_match": {
+          "n": 1,
+          "of": 1,
+          "rate": 1.0
+        },
+        "dangerous_miss": {
+          "n": 0,
+          "of": 1,
+          "rate": 0.0
+        },
+        "check_recall": {
+          "n": 1,
+          "of": 1,
+          "rate": 1.0
+        }
+      },
+      "false_refusal": {
+        "n": 1,
+        "verdict_match": {
+          "n": 1,
+          "of": 1,
+          "rate": 1.0
+        },
+        "dangerous_miss": {
+          "n": 0,
+          "of": 1,
+          "rate": 0.0
+        },
+        "check_recall": {
+          "n": 1,
+          "of": 1,
+          "rate": 1.0
+        }
+      },
+      "format_break": {
+        "n": 2,
+        "verdict_match": {
+          "n": 1,
+          "of": 2,
+          "rate": 0.5
+        },
+        "dangerous_miss": {
+          "n": 1,
+          "of": 2,
+          "rate": 0.5
+        },
+        "check_recall": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        }
+      },
+      "invented_cause": {
+        "n": 2,
+        "verdict_match": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        },
+        "dangerous_miss": {
+          "n": 0,
+          "of": 2,
+          "rate": 0.0
+        },
+        "check_recall": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        }
+      },
+      "missing_assumption": {
+        "n": 2,
+        "verdict_match": {
+          "n": 1,
+          "of": 2,
+          "rate": 0.5
+        },
+        "dangerous_miss": {
+          "n": 1,
+          "of": 2,
+          "rate": 0.5
+        },
+        "check_recall": {
+          "n": 1,
+          "of": 2,
+          "rate": 0.5
+        }
+      },
+      "natural_approve": {
+        "n": 10,
+        "verdict_match": {
+          "n": 8,
+          "of": 10,
+          "rate": 0.8
+        },
+        "dangerous_miss": {
+          "n": 0,
+          "of": 0,
+          "rate": null
+        },
+        "check_recall": {
+          "n": 0,
+          "of": 0,
+          "rate": null
+        }
+      },
+      "natural_reject": {
+        "n": 1,
+        "verdict_match": {
+          "n": 1,
+          "of": 1,
+          "rate": 1.0
+        },
+        "dangerous_miss": {
+          "n": 0,
+          "of": 1,
+          "rate": 0.0
+        },
+        "check_recall": {
+          "n": 1,
+          "of": 1,
+          "rate": 1.0
+        }
+      },
+      "number_mismatch": {
+        "n": 2,
+        "verdict_match": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        },
+        "dangerous_miss": {
+          "n": 0,
+          "of": 2,
+          "rate": 0.0
+        },
+        "check_recall": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        }
+      },
+      "threshold_off_by_one": {
+        "n": 2,
+        "verdict_match": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        },
+        "dangerous_miss": {
+          "n": 0,
+          "of": 2,
+          "rate": 0.0
+        },
+        "check_recall": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        }
+      },
+      "unsupported_claim": {
+        "n": 2,
+        "verdict_match": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        },
+        "dangerous_miss": {
+          "n": 0,
+          "of": 2,
+          "rate": 0.0
+        },
+        "check_recall": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        }
+      },
+      "wrong_filter": {
+        "n": 2,
+        "verdict_match": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        },
+        "dangerous_miss": {
+          "n": 0,
+          "of": 2,
+          "rate": 0.0
+        },
+        "check_recall": {
+          "n": 2,
+          "of": 2,
+          "rate": 1.0
+        }
+      }
+    },
+    "per_check": {
+      "numbers": {
+        "expected": 2,
+        "recalled": 2,
+        "flagged": 8,
+        "flagged_on_approve": 1
+      },
+      "definitions": {
+        "expected": 3,
+        "recalled": 3,
+        "flagged": 4,
+        "flagged_on_approve": 1
+      },
+      "grain_population": {
+        "expected": 2,
+        "recalled": 2,
+        "flagged": 4,
+        "flagged_on_approve": 0
+      },
+      "assumptions": {
+        "expected": 5,
+        "recalled": 4,
+        "flagged": 14,
+        "flagged_on_approve": 3
+      },
+      "refusals_false_premises": {
+        "expected": 2,
+        "recalled": 2,
+        "flagged": 2,
+        "flagged_on_approve": 0
+      },
+      "claims_beyond_data": {
+        "expected": 4,
+        "recalled": 4,
+        "flagged": 13,
+        "flagged_on_approve": 2
+      },
+      "format": {
+        "expected": 2,
+        "recalled": 2,
+        "flagged": 4,
+        "flagged_on_approve": 0
+      }
+    },
+    "confusion": {
+      "approve": {
+        "approve": 8,
+        "revise": 2,
+        "reject": 0,
+        "format_error": 0,
+        "agent_failure": 0
+      },
+      "revise": {
+        "approve": 2,
+        "revise": 8,
+        "reject": 0,
+        "format_error": 0,
+        "agent_failure": 0
+      },
+      "reject": {
+        "approve": 0,
+        "revise": 0,
+        "reject": 9,
+        "format_error": 0,
+        "agent_failure": 0
+      }
+    }
+  },
+  "tokens": {
+    "input_tokens": 362736,
+    "output_tokens": 18416
+  }
+}
