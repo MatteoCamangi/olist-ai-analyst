@@ -20,6 +20,13 @@ RUNNER = HERE / "run_eval.py"
 SHOW = HERE / "show_detail.py"
 MARKER = "TRACE-MARKER-7f3a"
 ID = re.compile(r"\bq\d{3}\b")
+LEAK_EXEMPT = ("git_sha", "timestamp")  # machine-generated hex and digits; can never carry an expected value
+
+
+def assert_summary_no_leak(summary, label):
+    """The leak check on a run summary, without git_sha and timestamp: their digits can match an expected number by
+    chance (a commit sha containing "2071"). Every other field is checked as before."""
+    assert_no_leak({k: v for k, v in summary.items() if k not in LEAK_EXEMPT}, label)
 
 AGENTS = {
     "perfect": """
@@ -194,7 +201,7 @@ def test_perfect_agent_scores_100(env):
             assert rates["accuracy"] == 1.0, f"{split}/{s}: accuracy {rates['accuracy']}"
         n = sum(split in ("all", e["split"]) for e in Q.values())
         assert summary["n_questions"] == n and len(detail["questions"]) == n
-        assert_no_leak(summary, f"{split} summary")
+        assert_summary_no_leak(summary, f"{split} summary")
         if split != "dev":
             assert not ID.search(json.dumps(summary)), f"{split} summary holds question ids"
             assert not ID.search(p.stdout), f"{split} console holds question ids"
@@ -398,7 +405,7 @@ def test_summaries_hold_no_per_question_data(env):
         config = summary["agent_config"]
         assert config is None or (set(config) == {"model", "docs", "brief", "scope"}
                                   and all(isinstance(v, str) for v in config.values())), config
-        assert_no_leak(summary, path.name)
+        assert_summary_no_leak(summary, path.name)
 
 
 def run_files(env):
@@ -512,6 +519,29 @@ def test_show_detail_refuses_hidden(env):
         assert s.stdout == "" and "dev only" in s.stderr
         assert e["question"].strip() not in s.stderr
     assert show(detail_path, "q001").returncode == 0
+
+
+@with_env
+def test_summary_leak_check_exempts_only_sha_and_timestamp(env):
+    p = env.run("--split", "dev", "--label", "guard", "--questions", "q001", agent="perfect")
+    ok(p, "perfect")
+    summary, _ = env.latest(p)
+    assert_summary_no_leak(summary, "real summary")
+    strings, numbers = test_grader.hidden_values()
+    number = str(int(max(n for n in numbers if n.is_integer())))
+    string = sorted(strings, key=len)[-1]
+    for exempt in LEAK_EXEMPT:  # the chance case: digits of an expected number inside the sha or timestamp
+        assert_summary_no_leak({**summary, exempt: f"15860a85{number}"}, exempt)
+    for key in summary:
+        if key in LEAK_EXEMPT:
+            continue
+        for value in (number, string, {"nested": [number]}):
+            try:
+                assert_summary_no_leak({**summary, key: value}, key)
+            except AssertionError:
+                continue
+            raise AssertionError(f"an expected value in summary field {key!r} was not caught")
+    assert {"rates", "usage", "agent_config", "label", "agent_cmd"} <= set(summary) - set(LEAK_EXEMPT)
 
 
 def test_hidden_values_list_is_not_empty():

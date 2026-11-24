@@ -584,14 +584,14 @@ def test_runner_reports_both_label_views(env):
     assert p.returncode == 0, p.stderr[-800:]
     summary, detail = env.latest(p)
     n = len(CASES)
-    assert summary["label_view"] == "corrected" and summary["label_corrections"] == ["q001.ok", "q018.ok"]
+    assert summary["label_view"] == "corrected" and summary["label_corrections"] == ["q001.ok", "q010.ok", "q018.ok"]
     assert summary["scorer_version"] == runner.SCORER_VERSION == 3
     corrected, original = summary["metrics"], summary["original_labels"]["metrics"]
     assert set(summary["original_labels"]) == {"metrics", "per_fault_type", "per_check", "confusion"}
     assert corrected["verdict_match"]["n"] == n  # the fake agent follows the corrected labels
-    assert original["verdict_match"] == {"n": n - 2, "of": n, "rate": round((n - 2) / n, 4)}
-    assert original["false_alarm"] == {"n": 2, "of": 10, "rate": 0.2} and corrected["false_alarm"]["of"] == 8
-    assert summary["original_labels"]["confusion"]["approve"]["revise"] == 2
+    assert original["verdict_match"] == {"n": n - 3, "of": n, "rate": round((n - 3) / n, 4)}
+    assert original["false_alarm"] == {"n": 3, "of": 10, "rate": 0.3} and corrected["false_alarm"]["of"] == 7
+    assert summary["original_labels"]["confusion"]["approve"]["revise"] == 3
     assert "natural_revise" not in summary["original_labels"]["per_fault_type"]
     by_id = {c["id"]: c for c in detail["cases"]}
     assert by_id["q001.ok"]["expected_verdict"] == "revise" and by_id["q001.ok"]["original_expected_verdict"] == "approve"

@@ -402,8 +402,10 @@
     "fault_type": null,
     "base_case": null,
     "edits": null,
-    "expected_verdict": "approve",
-    "expected_failed_checks": [],
+    "expected_verdict": "revise",
+    "expected_failed_checks": [
+      "claims_beyond_data"
+    ],
     "source": {
       "run": "20261121T174710Z_dev_v3-harder",
       "git_sha": "27f44c8b81e9b4577a6308395c148da9e42706e7",
@@ -411,7 +413,26 @@
       "outcome": "correct",
       "sha256": "275954fd48bc59aa4c3b395de5dc07f4748a1b6a484c113ee6637be6cc32fdee"
     },
-    "note": "Correct answer from the full-context dev run."
+    "note": "Real answer with the right headline but an unsupported assumption: it says a minimum volume of 5 was applied and every state passes it, which the trace does not show.",
+    "label_history": [
+      {
+        "date": "2026-11-24",
+        "from": {
+          "expected_verdict": "approve",
+          "expected_failed_checks": [],
+          "note": "Correct answer from the full-context dev run."
+        },
+        "to": {
+          "expected_verdict": "revise",
+          "expected_failed_checks": [
+            "claims_beyond_data"
+          ],
+          "note": "Real answer with the right headline but an unsupported assumption: it says a minimum volume of 5 was applied and every state passes it, which the trace does not show."
+        },
+        "reason": "assumption states a minimum volume of 5 was applied and that every state passes it; query 1 has no HAVING and uses LIMIT 8, so neither is shown in the trace",
+        "source": "found by the v2 runs after reading findings; v1 had approved it"
+      }
+    ]
   },
   {
     "id": "q010.raw-bare",

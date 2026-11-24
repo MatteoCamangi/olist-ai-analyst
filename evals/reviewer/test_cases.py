@@ -109,8 +109,8 @@ def test_required_fields_and_values():
         assert any(e.get("event") == "sql" for e in c["trace"]), c["id"]
     assert {c["fault_type"] for c in CASES if c["fault_type"]} == set(mf.FAULT_TYPES)
     natural = [c for c in CASES if c["origin"] == "natural"]
-    assert sum(c["expected_verdict"] == "approve" for c in natural) == 8
-    assert sorted(c["id"] for c in natural if c["expected_verdict"] == "revise") == ["q001.ok", "q018.ok"]
+    assert sum(c["expected_verdict"] == "approve" for c in natural) == 7
+    assert sorted(c["id"] for c in natural if c["expected_verdict"] == "revise") == ["q001.ok", "q010.ok", "q018.ok"]
     assert BY_ID["q010.raw-bare"]["expected_verdict"] == "reject"
     assert BY_ID["q010.raw-bare"]["expected_failed_checks"] == ["definitions"]
 
@@ -139,11 +139,14 @@ def test_first_17_cases_unchanged():
 
 def test_label_corrections():
     corrected = [c for c in CASES if c.get("label_history")]
-    assert sorted(c["id"] for c in corrected) == ["q001.ok", "q018.ok"] == sorted(mf.LABEL_CORRECTIONS)
+    assert sorted(c["id"] for c in corrected) == ["q001.ok", "q010.ok", "q018.ok"] == sorted(mf.LABEL_CORRECTIONS)
+    sources = {"q001.ok": "corrected after reading reviewer v1 findings",
+               "q018.ok": "corrected after reading reviewer v1 findings",
+               "q010.ok": "found by the v2 runs after reading findings; v1 had approved it"}
     for c in corrected:
         (entry,) = c["label_history"]
         assert set(entry) == {"date", "from", "to", "reason", "source"}, entry
-        assert entry["date"] == "2026-11-24" and entry["source"] == "corrected after reading reviewer v1 findings"
+        assert entry["date"] == "2026-11-24" and entry["source"] == sources[c["id"]], c["id"]
         assert entry["from"]["expected_verdict"] == "approve" and entry["from"]["expected_failed_checks"] == []
         assert entry["to"] == {k: c[k] for k in ("expected_verdict", "expected_failed_checks", "note")}
         assert c["expected_verdict"] == "revise" and c["expected_failed_checks"] == ["claims_beyond_data"]
@@ -186,7 +189,7 @@ def test_every_brief_check_has_two_cases():
         n = sum(check in c["expected_failed_checks"] for c in CASES)
         assert n >= 2, (check, n)
     counts = {v: sum(c["expected_verdict"] == v for c in CASES) for v in mf.VERDICTS}
-    assert counts == {"approve": 8, "revise": 12, "reject": 9}, counts
+    assert counts == {"approve": 7, "revise": 13, "reject": 9}, counts
 
 
 def test_verdicts_follow_the_brief():

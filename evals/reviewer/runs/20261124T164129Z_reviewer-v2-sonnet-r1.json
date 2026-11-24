@@ -1,18 +1,18 @@
 {
-  "timestamp": "20261124T161751Z",
-  "label": "reviewer-v1-sonnet-rescored",
+  "timestamp": "20261124T164129Z",
+  "label": "reviewer-v2-sonnet-r1",
   "scorer_version": 3,
-  "git_sha": "e09beac8f6c7199fbfe79cbd0ffc76fe6d5fd5e8",
-  "git_dirty": true,
+  "git_sha": "c068cb128d2bf0da805a45c6b94be2da20220413",
+  "git_dirty": false,
   "agent_cmd": "python agent/reviewer.py",
   "cases_file": "/workspaces/olist-ai-analyst/evals/reviewer/cases.json",
   "only": null,
   "agent_config": {
     "model": "claude-sonnet-5-5"
   },
-  "rescored_from": "20261122T213059Z_reviewer-v1-sonnet.json",
-  "original_timestamp": "20261122T213059Z",
-  "original_git_sha": "5cca3695e506d989d651fae3c94b13f00be914c8",
+  "rescored_from": null,
+  "original_timestamp": null,
+  "original_git_sha": null,
   "n_cases": 29,
   "label_view": "corrected",
   "label_corrections": [
@@ -26,14 +26,14 @@
       "rate": 0.9655
     },
     "dangerous_miss": {
-      "n": 1,
+      "n": 0,
       "of": 21,
-      "rate": 0.0476
+      "rate": 0.0
     },
     "false_alarm": {
-      "n": 0,
+      "n": 1,
       "of": 8,
-      "rate": 0.0
+      "rate": 0.125
     },
     "soft_miss": {
       "n": 0,
@@ -41,24 +41,24 @@
       "rate": 0.0
     },
     "check_recall": {
-      "n": 21,
+      "n": 20,
       "of": 21,
-      "rate": 1.0
+      "rate": 0.9524
     },
     "evidence_valid": {
-      "n": 24,
-      "of": 25,
-      "rate": 0.96
+      "n": 22,
+      "of": 22,
+      "rate": 1.0
     },
     "invented_numbers": {
       "n": 0,
-      "of": 25,
+      "of": 22,
       "rate": 0.0
     },
     "derived_numbers": {
-      "n": 1,
-      "of": 25,
-      "rate": 0.04
+      "n": 0,
+      "of": 22,
+      "rate": 0.0
     },
     "format_error": {
       "n": 0,
@@ -165,14 +165,14 @@
     "missing_assumption": {
       "n": 2,
       "verdict_match": {
-        "n": 1,
+        "n": 2,
         "of": 2,
-        "rate": 0.5
+        "rate": 1.0
       },
       "dangerous_miss": {
-        "n": 1,
+        "n": 0,
         "of": 2,
-        "rate": 0.5
+        "rate": 0.0
       },
       "check_recall": {
         "n": 2,
@@ -183,9 +183,9 @@
     "natural_approve": {
       "n": 8,
       "verdict_match": {
-        "n": 8,
+        "n": 7,
         "of": 8,
-        "rate": 1.0
+        "rate": 0.875
       },
       "dangerous_miss": {
         "n": 0,
@@ -301,9 +301,9 @@
         "rate": 0.0
       },
       "check_recall": {
-        "n": 2,
+        "n": 1,
         "of": 2,
-        "rate": 1.0
+        "rate": 0.5
       }
     }
   },
@@ -311,14 +311,14 @@
     "numbers": {
       "expected": 2,
       "recalled": 2,
-      "flagged": 6,
+      "flagged": 9,
       "flagged_on_approve": 0
     },
     "definitions": {
       "expected": 3,
-      "recalled": 3,
-      "flagged": 5,
-      "flagged_on_approve": 1
+      "recalled": 2,
+      "flagged": 2,
+      "flagged_on_approve": 0
     },
     "grain_population": {
       "expected": 2,
@@ -328,9 +328,9 @@
     },
     "assumptions": {
       "expected": 5,
-      "recalled": 5,
-      "flagged": 18,
-      "flagged_on_approve": 2
+      "recalled": 4,
+      "flagged": 13,
+      "flagged_on_approve": 1
     },
     "refusals_false_premises": {
       "expected": 2,
@@ -341,27 +341,27 @@
     "claims_beyond_data": {
       "expected": 6,
       "recalled": 6,
-      "flagged": 14,
-      "flagged_on_approve": 1
+      "flagged": 11,
+      "flagged_on_approve": 0
     },
     "format": {
       "expected": 2,
       "recalled": 2,
-      "flagged": 4,
+      "flagged": 2,
       "flagged_on_approve": 0
     }
   },
   "confusion": {
     "approve": {
-      "approve": 8,
-      "revise": 0,
+      "approve": 7,
+      "revise": 1,
       "reject": 0,
       "format_error": 0,
       "agent_failure": 0
     },
     "revise": {
-      "approve": 1,
-      "revise": 11,
+      "approve": 0,
+      "revise": 12,
       "reject": 0,
       "format_error": 0,
       "agent_failure": 0
@@ -382,14 +382,14 @@
         "rate": 0.8966
       },
       "dangerous_miss": {
-        "n": 1,
+        "n": 0,
         "of": 19,
-        "rate": 0.0526
+        "rate": 0.0
       },
       "false_alarm": {
-        "n": 2,
+        "n": 3,
         "of": 10,
-        "rate": 0.2
+        "rate": 0.3
       },
       "soft_miss": {
         "n": 0,
@@ -397,24 +397,24 @@
         "rate": 0.0
       },
       "check_recall": {
-        "n": 19,
+        "n": 18,
         "of": 19,
-        "rate": 1.0
+        "rate": 0.9474
       },
       "evidence_valid": {
-        "n": 24,
-        "of": 25,
-        "rate": 0.96
+        "n": 22,
+        "of": 22,
+        "rate": 1.0
       },
       "invented_numbers": {
         "n": 0,
-        "of": 25,
+        "of": 22,
         "rate": 0.0
       },
       "derived_numbers": {
-        "n": 1,
-        "of": 25,
-        "rate": 0.04
+        "n": 0,
+        "of": 22,
+        "rate": 0.0
       },
       "format_error": {
         "n": 0,
@@ -521,14 +521,14 @@
       "missing_assumption": {
         "n": 2,
         "verdict_match": {
-          "n": 1,
+          "n": 2,
           "of": 2,
-          "rate": 0.5
+          "rate": 1.0
         },
         "dangerous_miss": {
-          "n": 1,
+          "n": 0,
           "of": 2,
-          "rate": 0.5
+          "rate": 0.0
         },
         "check_recall": {
           "n": 2,
@@ -539,9 +539,9 @@
       "natural_approve": {
         "n": 10,
         "verdict_match": {
-          "n": 8,
+          "n": 7,
           "of": 10,
-          "rate": 0.8
+          "rate": 0.7
         },
         "dangerous_miss": {
           "n": 0,
@@ -639,9 +639,9 @@
           "rate": 0.0
         },
         "check_recall": {
-          "n": 2,
+          "n": 1,
           "of": 2,
-          "rate": 1.0
+          "rate": 0.5
         }
       }
     },
@@ -649,14 +649,14 @@
       "numbers": {
         "expected": 2,
         "recalled": 2,
-        "flagged": 6,
-        "flagged_on_approve": 0
+        "flagged": 9,
+        "flagged_on_approve": 1
       },
       "definitions": {
         "expected": 3,
-        "recalled": 3,
-        "flagged": 5,
-        "flagged_on_approve": 1
+        "recalled": 2,
+        "flagged": 2,
+        "flagged_on_approve": 0
       },
       "grain_population": {
         "expected": 2,
@@ -666,9 +666,9 @@
       },
       "assumptions": {
         "expected": 5,
-        "recalled": 5,
-        "flagged": 18,
-        "flagged_on_approve": 3
+        "recalled": 4,
+        "flagged": 13,
+        "flagged_on_approve": 2
       },
       "refusals_false_premises": {
         "expected": 2,
@@ -679,27 +679,27 @@
       "claims_beyond_data": {
         "expected": 4,
         "recalled": 4,
-        "flagged": 14,
-        "flagged_on_approve": 3
+        "flagged": 11,
+        "flagged_on_approve": 2
       },
       "format": {
         "expected": 2,
         "recalled": 2,
-        "flagged": 4,
+        "flagged": 2,
         "flagged_on_approve": 0
       }
     },
     "confusion": {
       "approve": {
-        "approve": 8,
-        "revise": 2,
+        "approve": 7,
+        "revise": 3,
         "reject": 0,
         "format_error": 0,
         "agent_failure": 0
       },
       "revise": {
-        "approve": 1,
-        "revise": 9,
+        "approve": 0,
+        "revise": 10,
         "reject": 0,
         "format_error": 0,
         "agent_failure": 0
@@ -714,7 +714,7 @@
     }
   },
   "tokens": {
-    "input_tokens": 362736,
-    "output_tokens": 19556
+    "input_tokens": 372103,
+    "output_tokens": 15947
   }
 }
