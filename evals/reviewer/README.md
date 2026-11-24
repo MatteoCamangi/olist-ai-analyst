@@ -23,11 +23,11 @@ were appended after them. Each batch is sorted by id.
 
 | Origin | Count | Source | Expected verdict |
 |---|---|---|---|
-| natural | 10 | answers of the full-context dev run `20261121T174710Z_dev_v3-harder` (12/12 correct), untouched | approve (8), revise (2: q001.ok and q018.ok, see Label corrections) |
+| natural | 10 | answers of the full-context dev run `20261121T174710Z_dev_v3-harder` (12/12 correct), untouched | approve (7), revise (3: q001.ok, q010.ok and q018.ok, see Label corrections) |
 | natural | 1 | q010 of `20261122T170925Z_dev_grid-raw-bare` (raw scope, no docs, minimal brief): late rate on timestamps, AL 23.93% instead of 21.41% | reject (definitions) |
 | injected | 18 | a copy of one approve case with deterministic edits: 10 fault types, two variants on different bases for eight of them | reject or revise |
 
-**Verdict counts: approve 8, revise 12, reject 9** (before the label corrections of 2026-11-24: approve 10, revise 10).
+**Verdict counts: approve 7, revise 13, reject 9** (before the label corrections of 2026-11-24: approve 10, revise 10).
 
 q007 and q011 of the v3-harder run are left out. Their traces list a few ids (rows past the dev cut-off) that are
 also hidden expected values and are neither dev expected values nor in the public docs. Including them untouched
@@ -35,26 +35,36 @@ would put hidden answer values in this folder.
 
 ## Label corrections
 
-Two natural cases were relabelled after reading the findings of the first reviewer runs (reviewer v1,
-`20261122T192400Z` and `20261122T213059Z`). This is a post-hoc change, so it is recorded in the cases
-(`label_history`) and every summary reports metrics under both label sets.
+Three natural cases were relabelled after reading reviewer findings. These are post-hoc changes, so each is recorded
+in the case (`label_history`) and every summary reports metrics under both label sets.
 
-| Case | Was | Now | Reason |
-|---|---|---|---|
-| q001.ok | approve | revise, claims_beyond_data | The response says "The data has no orders before 2017-01-05", but query 1 is filtered to 2017 and docs/metrics.md says the data starts 2016-09-04. It also says "Early 2017 also reflects the marketplace ramp-up", which no query supports. |
-| q018.ok | approve | revise, claims_beyond_data | The response says bed_bath_table would lead by volume, but query 1 ranks categories by revenue with LIMIT 5, so categories outside the revenue top 5 were never compared by volume. |
+| Case | Was | Now | Found by | Reason |
+|---|---|---|---|---|
+| q001.ok | approve | revise, claims_beyond_data | reviewer v1 findings | The response says "The data has no orders before 2017-01-05", but query 1 is filtered to 2017 and docs/metrics.md says the data starts 2016-09-04. It also says "Early 2017 also reflects the marketplace ramp-up", which no query supports. |
+| q018.ok | approve | revise, claims_beyond_data | reviewer v1 findings | The response says bed_bath_table would lead by volume, but query 1 ranks categories by revenue with LIMIT 5, so categories outside the revenue top 5 were never compared by volume. |
+| q010.ok | approve | revise, claims_beyond_data | reviewer v2 findings (v1 had approved it) | The assumption states that a minimum volume of 5 was applied and that every state passes it; query 1 has no HAVING and uses LIMIT 8, so neither is shown in the trace. |
 
-Both corrections are dated 2026-11-24 with the source "corrected after reading reviewer v1 findings". The headline
-answers (orders, revenue, best category) are right; the flaws are claims around them, so the verdict is revise.
+All three are dated 2026-11-24. Sources: "corrected after reading reviewer v1 findings" (q001.ok, q018.ok) and "found
+by the v2 runs after reading findings; v1 had approved it" (q010.ok). The headline answers are right; the flaws are
+claims around them, so the verdict is revise.
+
+**Bias risk.** Every correction so far came from reading the reviewer's own findings, and each one moved a label
+toward what the reviewer said, on the dev cases the reviewer is tuned on. That inflates the corrected-label scores of
+whichever reviewer prompted the change. Mitigations: a label changes only with a reason that points to the trace or
+the docs; the original-label view is always reported next to the corrected one; hidden questions are never relabelled;
+and the held-out run is the test that counts. q010.ok also shows the limit of the labels: v2 flags it under
+`assumptions`, while the label says `claims_beyond_data` (a statement of volume no result supports), so
+`check_recall` counts it as a miss even though the verdict is right.
 
 **Metrics under two label sets.** Summaries report the corrected labels as the headline (`metrics`, `per_fault_type`,
 `per_check`, `confusion`, `label_view: "corrected"`) and the original labels under `original_labels`. Scores before
-and after the correction stay comparable.
+and after the corrections stay comparable.
 
 **Injected cases on these bases are not single-fault cases.** q001.threshold_off_by_one, q001.unsupported_claim,
-q018.missing_assumption and q018.wrong_filter were built from q001.ok and q018.ok and inherit their unsupported
-claims. Their labels are unchanged: they are judged on the injected fault, and a reviewer that also flags the
-inherited claim is not penalised (extra flags cost nothing in `check_recall`).
+q018.missing_assumption, q018.wrong_filter, q010.invented_cause and q010.contradicting_assumption were built from
+q001.ok, q018.ok and q010.ok and inherit their unsupported claims. Their labels are unchanged: they are judged on the
+injected fault, and a reviewer that also flags the inherited claim is not penalised (extra flags cost nothing in
+`check_recall`).
 
 ## Schema
 
@@ -289,3 +299,63 @@ v2 runs use their own label (for example `reviewer-v2-sonnet`).
 5. No new format errors.
 
 If (1) or (2) fails, v2 is not adopted, and the cause is investigated before anything else is changed.
+
+## Brief v2 outcome
+
+Two v2 runs (`20261124T164129Z_reviewer-v2-sonnet-r1`, `20261124T164504Z_reviewer-v2-sonnet-r2`, claude-sonnet-5-5,
+brief v2 at c068cb1, scorer v3). r2 records `git_dirty: true` only because r1's summary was untracked when it ran.
+
+**Pre-registered criteria, as measured** (labels at run time: the q001.ok and q018.ok corrections):
+
+| # | Criterion | r1 | r2 | Result |
+|---|---|---|---|---|
+| 1 | all 9 reject cases still rejected | 9/9 | 9/9 | met |
+| 2 | 0 false alarms on the 8 approve cases | 1/8 (q010.ok) | 1/8 (q010.ok) | **failed as written** |
+| 3 | q013.missing_assumption gets revise | revise | revise | met |
+| 4 | evidence_valid at least as high as v1 rescored (21/23, 24/25) | 22/22 | 22/22 | met as a rate (100% against 91% and 96%); as a raw count, 22 is below 24 in the second pairing, because v2 made findings on fewer cases |
+| 5 | no new format errors | 0/29 | 0/29 | met |
+
+**Investigation of criterion 2.** The only false alarm is the same case in both runs: q010.ok got revise with one
+medium `assumptions` finding quoting "Minimum volume of 5 eligible orders per state. Every state passes it". The trace
+has one query, with no HAVING and LIMIT 8, so neither the threshold nor "every state passes it" is shown. The
+finding is right and the label was wrong: q010.ok is corrected to revise (see Label corrections). v1 approved this case
+in both runs.
+
+**Decision.** v2 is adopted provisionally. By the stop rule, a failed criterion 2 means v2 is not adopted until the
+cause is understood; the cause is a wrong label, not a reviewer error, so the rule's purpose is met. This judgement
+was made after seeing the results and adds to the bias risk above. The held-out run is the real test.
+
+**v1 against v2, both runs each** (scorer v3, rescored from the saved outputs; no new API calls).
+
+Original labels (no corrections):
+
+| metric | v1 r1 | v1 r2 | v2 r1 | v2 r2 |
+|---|---|---|---|---|
+| verdict_match | 25/29 | 26/29 | 26/29 | 26/29 |
+| dangerous_miss | 2/19 | 1/19 | 0/19 | 0/19 |
+| false_alarm | 2/10 | 2/10 | 3/10 | 3/10 |
+| soft_miss | 0/19 | 0/19 | 0/19 | 0/19 |
+| check_recall | 18/19 | 19/19 | 18/19 | 19/19 |
+| evidence_valid | 21/23 | 24/25 | 22/22 | 22/22 |
+| invented_numbers | 0/23 | 0/25 | 0/22 | 0/22 |
+| derived_numbers | 0/23 | 1/25 | 0/22 | 0/22 |
+| format_error | 0/29 | 0/29 | 0/29 | 0/29 |
+
+Corrected labels (q001.ok, q010.ok, q018.ok):
+
+| metric | v1 r1 | v1 r2 | v2 r1 | v2 r2 |
+|---|---|---|---|---|
+| verdict_match | 26/29 | 27/29 | 29/29 | 29/29 |
+| dangerous_miss | 3/22 | 2/22 | 0/22 | 0/22 |
+| false_alarm | 0/7 | 0/7 | 0/7 | 0/7 |
+| soft_miss | 0/22 | 0/22 | 0/22 | 0/22 |
+| check_recall | 20/22 | 21/22 | 20/22 | 21/22 |
+| evidence_valid | 21/23 | 24/25 | 22/22 | 22/22 |
+| invented_numbers | 0/23 | 0/25 | 0/22 | 0/22 |
+| derived_numbers | 0/23 | 1/25 | 0/22 | 0/22 |
+| format_error | 0/29 | 0/29 | 0/29 | 0/29 |
+
+Under the original labels, v2 matches v1 on verdicts (26/29) and removes the dangerous misses (0 against 2 and 1)
+at the cost of one more false alarm: q010.ok, the case later relabelled. Under the corrected labels both v2 runs match
+every verdict. Read the corrected column with the bias risk in mind: all three corrections came from reviewer
+findings.

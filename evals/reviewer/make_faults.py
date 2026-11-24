@@ -52,6 +52,14 @@ LABEL_CORRECTIONS = {
                   "docs/metrics.md says the data starts 2016-09-04; it also says \"Early 2017 also reflects the "
                   "marketplace ramp-up\", which no query supports.",
     },
+    "q010.ok": {
+        "expected_verdict": "revise", "expected_failed_checks": ["claims_beyond_data"],
+        "note": "Real answer with the right headline but an unsupported assumption: it says a minimum volume of 5 was "
+                "applied and every state passes it, which the trace does not show.",
+        "reason": "assumption states a minimum volume of 5 was applied and that every state passes it; query 1 has no "
+                  "HAVING and uses LIMIT 8, so neither is shown in the trace",
+        "source": "found by the v2 runs after reading findings; v1 had approved it",
+    },
     "q018.ok": {
         "expected_verdict": "revise", "expected_failed_checks": ["claims_beyond_data"],
         "note": "Real answer with the right headline but an unsupported volume claim: bed_bath_table would lead by "
@@ -515,8 +523,8 @@ def apply_label_correction(case, fix):
     if fix["expected_verdict"] not in VERDICTS or not set(fix["expected_failed_checks"]) <= set(CHECKS):
         raise SystemExit(f"make_faults: {case['id']}: unknown verdict or check in the correction")
     case.update(after)
-    case["label_history"] = [{"date": CORRECTION_DATE, "from": before, "to": after, "reason": fix["reason"],
-                              "source": CORRECTION_SOURCE}]
+    case["label_history"] = [{"date": fix.get("date", CORRECTION_DATE), "from": before, "to": after,
+                              "reason": fix["reason"], "source": fix.get("source", CORRECTION_SOURCE)}]
 
 
 def render(cases):
