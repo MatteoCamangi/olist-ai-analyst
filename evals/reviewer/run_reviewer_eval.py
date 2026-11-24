@@ -42,9 +42,9 @@ CASES = HERE / "cases.json"
 RUNS = HERE / "runs"
 DEFAULT_CMD = "python agent/reviewer.py"
 PAYLOAD_FIELDS = reviewer.INPUT_FIELDS  # the only case fields the agent ever sees
-SCORER_VERSION = 2
+SCORER_VERSION = 3
 DOC_SOURCES = ("docs/metrics.md", "evals/ANSWER_FORMAT.md")  # evidence text sources
-NUMBER_DOC_SOURCES = ("docs/metrics.md",)  # ANSWER_FORMAT.md example values are illustrative, never number sources
+NUMBER_DOC_SOURCES = ("docs/metrics.md",)  # ANSWER_FORMAT.md example values count only inside a verbatim quote
 VERDICTS = reviewer.VERDICTS
 CHECKS = reviewer.CHECKS
 USAGE_LINE = re.compile(r"^USAGE (\{.*\})\s*$", re.MULTILINE)
@@ -234,13 +234,30 @@ def number_derived(value, decimals, local):
     return False
 
 
+def quoted_numbers(finding, text_sources):
+    """Numbers inside the finding's quoted spans that are found verbatim in a source (any source, ANSWER_FORMAT.md
+    included): a quotation of the inputs, so its numbers are not made up."""
+    values = set()
+    for field in ("evidence", "fix"):
+        for span in quoted_spans(finding.get(field, "")):
+            pieces = span_pieces(span)
+            if pieces and any(all(p in src for p in pieces) for src in text_sources):
+                values |= {v for v, _ in numbers_in(span)}
+    return values
+
+
 def classify_numbers(findings, case, docs):
-    """(invented, derived) numbers over every finding's evidence and fix."""
+    """(invented, derived) numbers over every finding's evidence and fix (scorer version 3).
+
+    A number is supported if a number source (response, trace, docs/metrics.md) matches it, or if the same value
+    occurs inside a verbatim-found quoted span of the same finding (then every occurrence in that finding counts)."""
     sources, local = source_numbers(case, docs), local_numbers(case)
+    text_sources, _ = case_sources(case, docs)
     invented, derived = [], []
     for f in findings:
+        quoted = quoted_numbers(f, text_sources)
         for value, decimals in numbers_in(f"{f.get('evidence', '')} {f.get('fix', '')}"):
-            if number_supported(value, decimals, sources):
+            if number_supported(value, decimals, sources) or number_supported(value, decimals, quoted):
                 continue
             (derived if number_derived(value, decimals, local) else invented).append(value)
     return invented, derived

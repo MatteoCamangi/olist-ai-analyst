@@ -388,6 +388,26 @@ def test_derived_numbers():
     assert invented("Together that is 14,454,629.83.")[0] == [14454629.83]
 
 
+def test_numbers_inside_verbatim_quotes_are_supported():
+    q020 = BY_ID["q020.format_break"]
+    finding = lambda ev, fix="": runner.classify_numbers([{"evidence": ev, "fix": fix}], q020, DOCS)
+    assert finding('The spec says percentages are numbers, not "37.42%".') == ([], [])
+    assert finding("The spec shows `37.42` as the number form.") == ([], [])
+    # per finding: once quoted verbatim, the same value elsewhere in that finding is supported too
+    real = ('"top10_revenue_share_pct": "13.27%" (the schema says number, and the spec says percentages are numbers '
+            'like 37.42, not "37.42%")')
+    assert finding(real) == ([], [])
+    assert finding("The JSON value is a string.", fix='Write 37.42 as in the spec, not "37.42%".') == ([], [])
+    # unquoted, or quoted but not verbatim in any source: still invented
+    assert finding("The JSON value is a string.", fix="Write a plain number such as 37.42.") == ([37.42], [])
+    assert finding('The spec says "use 37.42 percent here"') == ([37.42], [])
+    assert finding('Quote: "this sentence with 88.8 is in no source"') == ([88.8], [])
+    # quotes only help their own finding
+    two = [{"evidence": 'The spec: "37.42%"', "fix": ""}, {"evidence": "x", "fix": "Use 37.42."}]
+    assert runner.classify_numbers(two, q020, DOCS) == ([37.42], [])
+    assert runner.SCORER_VERSION == 3
+
+
 def test_answer_format_examples_are_not_number_sources():
     fmt = (ROOT / "evals/ANSWER_FORMAT.md").read_text()
     metrics = (ROOT / "docs/metrics.md").read_text()
@@ -565,7 +585,7 @@ def test_runner_reports_both_label_views(env):
     summary, detail = env.latest(p)
     n = len(CASES)
     assert summary["label_view"] == "corrected" and summary["label_corrections"] == ["q001.ok", "q018.ok"]
-    assert summary["scorer_version"] == runner.SCORER_VERSION == 2
+    assert summary["scorer_version"] == runner.SCORER_VERSION == 3
     corrected, original = summary["metrics"], summary["original_labels"]["metrics"]
     assert set(summary["original_labels"]) == {"metrics", "per_fault_type", "per_check", "confusion"}
     assert corrected["verdict_match"]["n"] == n  # the fake agent follows the corrected labels

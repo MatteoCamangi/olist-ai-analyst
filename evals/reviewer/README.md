@@ -206,9 +206,13 @@ The runner starts `--agent-cmd` (default `python agent/reviewer.py`) once per ca
 A format error or agent failure never counts as a dangerous miss or a false alarm; it fails `verdict_match` and
 `check_recall`.
 
-Scoring rules below are **scorer version 2** (`scorer_version` in every summary). Summaries without the field were
-scored by version 1 (plain double quotes and backticks only, no ellipsis handling, ANSWER_FORMAT.md numbers counted as
-sources, no derived numbers).
+Scoring rules below are **scorer version 3** (`scorer_version` in every summary). History:
+
+| Version | Summaries | Change and why |
+|---|---|---|
+| 1 | no `scorer_version` field (reviewer v1 runs of 2026-11-22) | First rule: double quotes and backticks only, whitespace and case normalised, ANSWER_FORMAT.md numbers counted as number sources. Reading the v1 failures showed most evidence failures were formatting (single quotes, ellipses, markdown), and that copying an ANSWER_FORMAT example number could never be caught. |
+| 2 | 2026-11-24, replaced by v3 | Single-quoted spans (boundary rule), ellipsis pieces, stronger normalisation, derived vs invented numbers, ANSWER_FORMAT.md dropped as a number source. The last change made a reviewer quoting the spec's own example ("numbers like 37.42, not "37.42%"") count as inventing 37.42. |
+| 3 | current | A number inside a quoted span of a finding that is found verbatim in a source (ANSWER_FORMAT.md included) is supported, and so is every occurrence of that value in the same finding. Outside such quotes ANSWER_FORMAT.md numbers stay excluded. |
 
 **Normalisation.** Both the evidence and the sources are compared after: Unicode NFKD with accents dropped, curly
 apostrophes mapped to `'`, straight and curly double quotes removed, `**`, `__` and backticks removed, lowercased,
@@ -234,6 +238,9 @@ quotation that is not in the inputs (for example "6,610 delivered orders" when t
 dropped), leaving out query references and whole numbers from 0 to 10. Number sources are the response, the trace
 (SQL and results) and docs/metrics.md; the illustrative values in evals/ANSWER_FORMAT.md are not sources. A number is
 supported when a source number equals it or rounds to it at its own number of decimals (21.4 is supported by 21.41).
+It is also supported when the same value occurs inside a quoted span of the same finding (evidence or fix) that is
+found verbatim in a source, ANSWER_FORMAT.md included: a quotation of the inputs is not a made-up number. A quote
+helps only its own finding, and a quote that is not verbatim in any source supports nothing.
 An unsupported number is **derived** when it equals the sum or difference of two numbers from the response and trace
 (for example 0.13 = 4400.0 − 4399.87), and **invented** otherwise. Derived numbers are reported separately from
 invented ones: the brief says never to state a corrected number that is not in the trace, so they are worth seeing,

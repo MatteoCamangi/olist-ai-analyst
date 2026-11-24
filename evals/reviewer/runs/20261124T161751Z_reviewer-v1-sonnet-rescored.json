@@ -1,17 +1,17 @@
 {
-  "timestamp": "20261124T161303Z",
+  "timestamp": "20261124T161751Z",
   "label": "reviewer-v1-sonnet-rescored",
-  "scorer_version": 2,
-  "git_sha": "0e1fcdd01e4f2ba4df15eaf99c4c7b9684c4e9c2",
-  "git_dirty": false,
+  "scorer_version": 3,
+  "git_sha": "e09beac8f6c7199fbfe79cbd0ffc76fe6d5fd5e8",
+  "git_dirty": true,
   "agent_cmd": "python agent/reviewer.py",
   "cases_file": "/workspaces/olist-ai-analyst/evals/reviewer/cases.json",
   "only": null,
   "agent_config": {
     "model": "claude-sonnet-5-5"
   },
-  "rescored_from": "20261122T192400Z_reviewer-v1-sonnet.json",
-  "original_timestamp": "20261122T192400Z",
+  "rescored_from": "20261122T213059Z_reviewer-v1-sonnet.json",
+  "original_timestamp": "20261122T213059Z",
   "original_git_sha": "5cca3695e506d989d651fae3c94b13f00be914c8",
   "n_cases": 29,
   "label_view": "corrected",
@@ -21,14 +21,14 @@
   ],
   "metrics": {
     "verdict_match": {
-      "n": 27,
+      "n": 28,
       "of": 29,
-      "rate": 0.931
+      "rate": 0.9655
     },
     "dangerous_miss": {
-      "n": 2,
+      "n": 1,
       "of": 21,
-      "rate": 0.0952
+      "rate": 0.0476
     },
     "false_alarm": {
       "n": 0,
@@ -41,24 +41,24 @@
       "rate": 0.0
     },
     "check_recall": {
-      "n": 20,
+      "n": 21,
       "of": 21,
-      "rate": 0.9524
+      "rate": 1.0
     },
     "evidence_valid": {
-      "n": 21,
-      "of": 23,
-      "rate": 0.913
+      "n": 24,
+      "of": 25,
+      "rate": 0.96
     },
     "invented_numbers": {
-      "n": 1,
-      "of": 23,
-      "rate": 0.0435
+      "n": 0,
+      "of": 25,
+      "rate": 0.0
     },
     "derived_numbers": {
-      "n": 0,
-      "of": 23,
-      "rate": 0.0
+      "n": 1,
+      "of": 25,
+      "rate": 0.04
     },
     "format_error": {
       "n": 0,
@@ -129,14 +129,14 @@
     "format_break": {
       "n": 2,
       "verdict_match": {
-        "n": 1,
+        "n": 2,
         "of": 2,
-        "rate": 0.5
+        "rate": 1.0
       },
       "dangerous_miss": {
-        "n": 1,
+        "n": 0,
         "of": 2,
-        "rate": 0.5
+        "rate": 0.0
       },
       "check_recall": {
         "n": 2,
@@ -175,9 +175,9 @@
         "rate": 0.5
       },
       "check_recall": {
-        "n": 1,
+        "n": 2,
         "of": 2,
-        "rate": 0.5
+        "rate": 1.0
       }
     },
     "natural_approve": {
@@ -311,26 +311,26 @@
     "numbers": {
       "expected": 2,
       "recalled": 2,
-      "flagged": 8,
+      "flagged": 6,
       "flagged_on_approve": 0
     },
     "definitions": {
       "expected": 3,
       "recalled": 3,
-      "flagged": 4,
+      "flagged": 5,
       "flagged_on_approve": 1
     },
     "grain_population": {
       "expected": 2,
       "recalled": 2,
-      "flagged": 4,
+      "flagged": 5,
       "flagged_on_approve": 0
     },
     "assumptions": {
       "expected": 5,
-      "recalled": 4,
-      "flagged": 14,
-      "flagged_on_approve": 1
+      "recalled": 5,
+      "flagged": 18,
+      "flagged_on_approve": 2
     },
     "refusals_false_premises": {
       "expected": 2,
@@ -341,8 +341,8 @@
     "claims_beyond_data": {
       "expected": 6,
       "recalled": 6,
-      "flagged": 13,
-      "flagged_on_approve": 0
+      "flagged": 14,
+      "flagged_on_approve": 1
     },
     "format": {
       "expected": 2,
@@ -360,8 +360,8 @@
       "agent_failure": 0
     },
     "revise": {
-      "approve": 2,
-      "revise": 10,
+      "approve": 1,
+      "revise": 11,
       "reject": 0,
       "format_error": 0,
       "agent_failure": 0
@@ -377,14 +377,14 @@
   "original_labels": {
     "metrics": {
       "verdict_match": {
-        "n": 25,
+        "n": 26,
         "of": 29,
-        "rate": 0.8621
+        "rate": 0.8966
       },
       "dangerous_miss": {
-        "n": 2,
+        "n": 1,
         "of": 19,
-        "rate": 0.1053
+        "rate": 0.0526
       },
       "false_alarm": {
         "n": 2,
@@ -397,24 +397,24 @@
         "rate": 0.0
       },
       "check_recall": {
-        "n": 18,
+        "n": 19,
         "of": 19,
-        "rate": 0.9474
+        "rate": 1.0
       },
       "evidence_valid": {
-        "n": 21,
-        "of": 23,
-        "rate": 0.913
+        "n": 24,
+        "of": 25,
+        "rate": 0.96
       },
       "invented_numbers": {
-        "n": 1,
-        "of": 23,
-        "rate": 0.0435
+        "n": 0,
+        "of": 25,
+        "rate": 0.0
       },
       "derived_numbers": {
-        "n": 0,
-        "of": 23,
-        "rate": 0.0
+        "n": 1,
+        "of": 25,
+        "rate": 0.04
       },
       "format_error": {
         "n": 0,
@@ -485,14 +485,14 @@
       "format_break": {
         "n": 2,
         "verdict_match": {
-          "n": 1,
+          "n": 2,
           "of": 2,
-          "rate": 0.5
+          "rate": 1.0
         },
         "dangerous_miss": {
-          "n": 1,
+          "n": 0,
           "of": 2,
-          "rate": 0.5
+          "rate": 0.0
         },
         "check_recall": {
           "n": 2,
@@ -531,9 +531,9 @@
           "rate": 0.5
         },
         "check_recall": {
-          "n": 1,
+          "n": 2,
           "of": 2,
-          "rate": 0.5
+          "rate": 1.0
         }
       },
       "natural_approve": {
@@ -649,25 +649,25 @@
       "numbers": {
         "expected": 2,
         "recalled": 2,
-        "flagged": 8,
-        "flagged_on_approve": 1
+        "flagged": 6,
+        "flagged_on_approve": 0
       },
       "definitions": {
         "expected": 3,
         "recalled": 3,
-        "flagged": 4,
+        "flagged": 5,
         "flagged_on_approve": 1
       },
       "grain_population": {
         "expected": 2,
         "recalled": 2,
-        "flagged": 4,
+        "flagged": 5,
         "flagged_on_approve": 0
       },
       "assumptions": {
         "expected": 5,
-        "recalled": 4,
-        "flagged": 14,
+        "recalled": 5,
+        "flagged": 18,
         "flagged_on_approve": 3
       },
       "refusals_false_premises": {
@@ -679,8 +679,8 @@
       "claims_beyond_data": {
         "expected": 4,
         "recalled": 4,
-        "flagged": 13,
-        "flagged_on_approve": 2
+        "flagged": 14,
+        "flagged_on_approve": 3
       },
       "format": {
         "expected": 2,
@@ -698,8 +698,8 @@
         "agent_failure": 0
       },
       "revise": {
-        "approve": 2,
-        "revise": 8,
+        "approve": 1,
+        "revise": 9,
         "reject": 0,
         "format_error": 0,
         "agent_failure": 0
@@ -715,6 +715,6 @@
   },
   "tokens": {
     "input_tokens": 362736,
-    "output_tokens": 18416
+    "output_tokens": 19556
   }
 }
