@@ -28,7 +28,7 @@ BY_ID = {c["id"]: c for c in CASES}
 HIDDEN_IDS = {qid for qid, e in grader.load_questions().items() if e["split"] != "dev"}
 KEY = "sk-test-secret-123"
 ANSWER_KEY_WORDS = ("expected", "fault_type", "origin", "base_case", "edits", "split")
-DOCS = [(ROOT / d).read_text() for d in runner.DOC_SOURCES]
+DOCS = runner.load_docs()
 GOOD = {"verdict": "reject", "reason": "Wrong filter.",
         "findings": [{"check": "definitions", "severity": "high", "evidence": "query 1", "fix": "Use delivered."}]}
 
@@ -292,6 +292,55 @@ def test_invalid_outputs():
         assert s["false_alarm"] is False
 
 
+def test_quoted_spans():
+    spans = runner.quoted_spans
+    assert spans("The analyst's view 'AL has the highest rate' holds") == ["AL has the highest rate"]
+    assert spans("Olist's warehouses and the customer's city") == []
+    assert spans("assumptions: 'Share of total revenue (13,496,408.43) is 9.30%'") == \
+        ["Share of total revenue (13,496,408.43) is 9.30%"]
+    assert spans("(\u2018curly single\u2019) and \u201ccurly double\u201d and `code`") == \
+        ["curly double", "code", "curly single"]
+    assert spans("'start of text' then 'end'") == ["start of text", "end"]
+    assert spans("he said 'it is fine'ish") == []  # closing quote must precede space, punctuation or end
+    assert spans("'Olist\u2019s warehouses are there' and more") == ["Olist's warehouses are there"]
+    assert spans('"Canceled means order_status = \'canceled\'"') == ["Canceled means order_status = 'canceled'"]
+
+
+def test_evidence_v2_formatting():
+    sources, n = runner.case_sources(BY_ID["q019.number_mismatch"], DOCS)
+    assert runner.evidence_ok('Answer text: "4.18, or 4.176 to three decimals"', sources, n)  # **4.18** in the text
+    sources, n = runner.case_sources(BY_ID["q010.raw-bare"], DOCS)
+    assert runner.evidence_ok("Answer JSON `late_rate_pct: 23.93`", sources, n)  # "late_rate_pct": 23.93
+    assert runner.evidence_ok('text "95 of its 397 ... 23.93%"', sources, n)
+    assert runner.evidence_ok('assumptions: "An order is late if \u2026 (timestamp comparison)"', sources, n)
+    assert runner.evidence_ok('"An order is late if [...] (timestamp comparison)"', sources, n)
+    assert not runner.evidence_ok('"An order is late if ... (date comparison)"', sources, n)  # one piece missing
+    sources, n = runner.case_sources(BY_ID["q005.invented_cause"], DOCS)
+    assert runner.evidence_ok("'Sao Paulo leads because Olist\u2019s warehouses are located there'", sources, n)
+    sources, n = runner.case_sources(BY_ID["q018.wrong_filter"], DOCS)
+    assert runner.evidence_ok("'Data covers 2016-09-04 to 2018-10-17; no date filter applied'", sources, n)
+    assert runner.evidence_ok("Response text: 'Ranked by volume, bed_bath_table would lead with 11,097 items'",
+                              sources, n)
+    # pieces must come from the same source: one from the response, one only from docs/metrics.md
+    assert "Never silently restrict to delivered" in DOCS["docs/metrics.md"]
+    assert not runner.evidence_ok('"By gross revenue, health_beauty ... Never silently restrict to delivered"',
+                                  sources, n)
+    assert runner.norm("**S\u00e3o** `Paulo` \u201cx\u201d it\u2019s __y__") == "sao paulo x it's y"
+
+
+def test_evidence_v2_regressions():
+    sources, n = runner.case_sources(BY_ID["q005.number_mismatch"], DOCS)
+    real_misquote = ('Query 1 shows rio de janeiro RJ orders_cnt 6601; the response says "6,610 delivered orders" '
+                     'and the JSON has "orders_cnt": 6610')
+    assert not runner.evidence_ok(real_misquote, sources, n)  # the response says "(RJ) with 6,610"
+    sources, n = runner.case_sources(BY_ID["q002.false_refusal"], DOCS)
+    paraphrase = "The assumptions list is empty. The docs require every answer to state the population and date range."
+    assert not runner.evidence_ok(paraphrase, sources, n)  # accurate, but no query reference and no quote
+    assert not runner.evidence_ok("query 4 shows it", sources, n)  # q002 has one query
+    assert not runner.evidence_ok("'a sentence that is nowhere in the inputs'", sources, n)
+    assert not runner.evidence_ok("query 1 and 'a sentence that is nowhere in the inputs'", sources, n)
+
+
 def test_evidence_rule():
     sources, n = runner.case_sources(mk(), DOCS)
     assert n == 2
@@ -309,17 +358,44 @@ def test_evidence_rule():
     assert score(mk(), "reject", "definitions", evidence="query 1")["evidence_valid"] is True
 
 
+def invented(text, case=None):
+    return runner.classify_numbers([{"evidence": text, "fix": ""}], case or mk(), DOCS)
+
+
 def test_invented_numbers():
-    nums = runner.source_numbers(mk(), DOCS)
     ok = ["Use 21.41%.", "Rounded it is 21.4%.", "There are 99,441 orders.", "See query 7.", "Use 3 decimals.",
           "Compare with 2018."]
     bad = ["It should be 23.50%.", "Expect 7,777 late orders.", "About 88.8 percent."]
     for text in ok:
-        assert not runner.invented_numbers([{"evidence": "", "fix": text}], nums), text
+        assert invented(text) == ([], []), text
     for text in bad:
-        assert runner.invented_numbers([{"evidence": text, "fix": ""}], nums), text
+        inv, der = invented(text)
+        assert inv and not der, (text, inv, der)
     assert score(mk(), "reject", "definitions", fix="Report 23.50% instead.")["invented_numbers"] is True
-    assert score(mk(), "reject", "definitions", fix="Report 21.41%.")["invented_numbers"] is False
+    s = score(mk(), "reject", "definitions", fix="Report 21.41%.")
+    assert s["invented_numbers"] is False and s["derived_numbers"] is False
+
+
+def test_derived_numbers():
+    q002 = BY_ID["q002.ok"]  # the 10th customer has 4400.0, the 11th 4399.87 (both in the trace)
+    fix = "Ties do not matter here: the 10th (4400.0) and 11th (4399.87) rows differ by 0.13."
+    inv, der = runner.classify_numbers([{"evidence": "query 1", "fix": fix}], q002, DOCS)
+    assert inv == [] and der == [0.13], (inv, der)
+    s = runner.score_case(q002, "valid", out("approve", "definitions", evidence="query 1", fix=fix), DOCS)
+    assert s["derived_numbers"] is True and s["invented_numbers"] is False
+    assert invented("The sum is 99462.41.") == ([], [99462.41])  # 99441 + 21.41 from the trace
+    # docs numbers support a figure but never make it derived: 13,221,498.11 + 1,233,131.72 (both metrics.md)
+    assert invented("Together that is 14,454,629.83.")[0] == [14454629.83]
+
+
+def test_answer_format_examples_are_not_number_sources():
+    fmt = (ROOT / "evals/ANSWER_FORMAT.md").read_text()
+    metrics = (ROOT / "docs/metrics.md").read_text()
+    assert "1,234" in fmt and "1,234" not in metrics and "1234" not in metrics
+    assert invented("There were 1,234 orders.") == ([1234.0], [])
+    assert "1,233,131.72" in metrics and invented("health_beauty is 1,233,131.72.") == ([], [])
+    assert runner.NUMBER_DOC_SOURCES == ("docs/metrics.md",)
+    assert "evals/ANSWER_FORMAT.md" in runner.DOC_SOURCES  # still a source for quoted evidence text
 
 
 def test_rates():
@@ -362,7 +438,9 @@ print(json.dumps({"verdict": None, "error": "format_error"}))
 print('USAGE {"input_tokens": 10, "output_tokens": 2, "model": "claude-fake"}', file=sys.stderr)
 """,
 }
-SUMMARY_KEYS = {"timestamp", "label", "git_sha", "git_dirty", "agent_cmd", "cases_file", "n_cases", "only",
+SUMMARY_KEYS = {"timestamp", "label", "scorer_version", "git_sha", "git_dirty", "agent_cmd", "cases_file", "n_cases",
+                "only", "rescored_from", "original_timestamp", "original_git_sha", "label_view", "label_corrections",
+                "original_labels",
                 "agent_config", "metrics", "per_fault_type", "per_check", "confusion", "tokens"}
 
 
@@ -423,7 +501,7 @@ def test_runner_perfect_agent(env):
     assert summary["agent_config"] == {"model": "claude-fake"}
     assert all(r["recalled"] == r["expected"] >= 2 for r in summary["per_check"].values())
     assert set(summary["per_fault_type"]) == {c["fault_type"] for c in CASES if c["fault_type"]} | \
-        {"natural_approve", "natural_reject"}
+        {"natural_approve", "natural_reject", "natural_revise"}
     assert sum(sum(row.values()) for row in summary["confusion"].values()) == n
     assert "dangerous_miss" in p.stdout and "tokens:" in p.stdout
     assert len(detail["cases"]) == n and all(c["output"]["verdict"] for c in detail["cases"])
@@ -445,17 +523,17 @@ def test_runner_sends_only_allowlisted_fields(env):
 
 @with_env
 def test_runner_subset_and_summary_schema(env):
-    p = env.run("--label", "sub", "--only", "q001.ok,q019.unsupported_claim")
+    p = env.run("--label", "sub", "--only", "q002.ok,q019.unsupported_claim")
     assert p.returncode == 0, p.stderr[-800:]
     summary, detail = env.latest(p)
     assert set(summary) == SUMMARY_KEYS, set(summary) ^ SUMMARY_KEYS
-    assert summary["n_cases"] == 2 and summary["only"] == ["q001.ok", "q019.unsupported_claim"]
+    assert summary["n_cases"] == 2 and summary["only"] == ["q002.ok", "q019.unsupported_claim"]
     assert set(summary["metrics"]) == set(runner.METRICS)
     assert all(set(r) == {"n", "of", "rate"} for r in summary["metrics"].values())
     assert summary["metrics"]["false_alarm"]["of"] == 1 and summary["metrics"]["dangerous_miss"]["of"] == 1
     text = json.dumps(summary)
-    assert "findings" not in text and "Fix it." not in text and BY_ID["q001.ok"]["response"][:40] not in text
-    assert [c["id"] for c in detail["cases"]] == ["q001.ok", "q019.unsupported_claim"]
+    assert "findings" not in text and "Fix it." not in text and BY_ID["q002.ok"]["response"][:40] not in text
+    assert [c["id"] for c in detail["cases"]] == ["q002.ok", "q019.unsupported_claim"]
     bad = env.run("--label", "x", "--only", "q001.ok,nope")
     assert bad.returncode == 2 and "unknown case ids" in bad.stderr
 
@@ -478,6 +556,58 @@ def test_runner_counts_format_errors(env):
     assert m["format_error"] == {"n": 3, "of": 3, "rate": 1.0} and m["verdict_match"]["n"] == 0
     assert m["dangerous_miss"]["n"] == 0 and m["agent_failure"]["n"] == 0
     assert summary["confusion"]["reject"]["format_error"] == 2
+
+
+@with_env
+def test_runner_reports_both_label_views(env):
+    p = env.run("--label", "views")
+    assert p.returncode == 0, p.stderr[-800:]
+    summary, detail = env.latest(p)
+    n = len(CASES)
+    assert summary["label_view"] == "corrected" and summary["label_corrections"] == ["q001.ok", "q018.ok"]
+    assert summary["scorer_version"] == runner.SCORER_VERSION == 2
+    corrected, original = summary["metrics"], summary["original_labels"]["metrics"]
+    assert set(summary["original_labels"]) == {"metrics", "per_fault_type", "per_check", "confusion"}
+    assert corrected["verdict_match"]["n"] == n  # the fake agent follows the corrected labels
+    assert original["verdict_match"] == {"n": n - 2, "of": n, "rate": round((n - 2) / n, 4)}
+    assert original["false_alarm"] == {"n": 2, "of": 10, "rate": 0.2} and corrected["false_alarm"]["of"] == 8
+    assert summary["original_labels"]["confusion"]["approve"]["revise"] == 2
+    assert "natural_revise" not in summary["original_labels"]["per_fault_type"]
+    by_id = {c["id"]: c for c in detail["cases"]}
+    assert by_id["q001.ok"]["expected_verdict"] == "revise" and by_id["q001.ok"]["original_expected_verdict"] == "approve"
+    assert by_id["q001.ok"]["scores"]["verdict_match"] and not by_id["q001.ok"]["scores_original"]["verdict_match"]
+    assert "original labels" in p.stdout
+
+
+@with_env
+def test_rescore(env):
+    p = env.run("--label", "base", "--only", "q001.ok,q013.wrong_filter,q019.number_mismatch")
+    assert p.returncode == 0, p.stderr[-800:]
+    summary, detail = env.latest(p)
+    files = {f: hashlib.sha256(f.read_bytes()).hexdigest() for f in env.files()}
+    (detail_path,) = [f for f in files if f.parent.name == "detail"]
+    argv = [sys.executable, str(HERE / "run_reviewer_eval.py"), "--runs-dir", str(env.runs),
+            "--agent-cmd", "false", "--rescore", str(detail_path)]  # an agent command that would fail
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=120, cwd=ROOT)
+    assert r.returncode == 0, r.stderr[-800:]
+    assert {f: hashlib.sha256(f.read_bytes()).hexdigest() for f in files} == files, "originals changed"
+    new = [f for f in env.files() if f not in files]
+    assert len(new) == 2, new
+    rescored, rdetail = env.latest(r)
+    assert rescored["label"] == "base-rescored" and rescored["rescored_from"] == detail_path.name
+    assert rescored["scorer_version"] == runner.SCORER_VERSION and set(rescored) == SUMMARY_KEYS
+    assert rescored["original_timestamp"] == summary["timestamp"] and rescored["original_git_sha"] == summary["git_sha"]
+    assert rescored["agent_cmd"] == summary["agent_cmd"] and rescored["tokens"] == summary["tokens"]
+    assert rescored["metrics"] == summary["metrics"] and rescored["n_cases"] == 3
+    assert [c["output"] for c in rdetail["cases"]] == [c["output"] for c in detail["cases"]]
+    r2 = subprocess.run(argv, capture_output=True, text=True, timeout=120, cwd=ROOT)  # again: a third pair of files
+    assert r2.returncode == 0 and len(env.files()) == 6
+    bad = subprocess.run(argv[:-1] + [str(new[0] if new[0].parent.name != "detail" else new[1])],
+                         capture_output=True, text=True, timeout=120, cwd=ROOT)
+    assert bad.returncode != 0 and "not a detail file" in bad.stderr
+    no_label = subprocess.run([sys.executable, str(HERE / "run_reviewer_eval.py"), "--runs-dir", str(env.runs)],
+                              capture_output=True, text=True, timeout=120, cwd=ROOT)
+    assert no_label.returncode == 2 and "--label is required" in no_label.stderr
 
 
 # ---------------------------------------------------------------------------------------------------------

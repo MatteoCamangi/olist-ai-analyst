@@ -40,8 +40,10 @@
     "fault_type": null,
     "base_case": null,
     "edits": null,
-    "expected_verdict": "approve",
-    "expected_failed_checks": [],
+    "expected_verdict": "revise",
+    "expected_failed_checks": [
+      "claims_beyond_data"
+    ],
     "source": {
       "run": "20261121T174710Z_dev_v3-harder",
       "git_sha": "27f44c8b81e9b4577a6308395c148da9e42706e7",
@@ -49,7 +51,26 @@
       "outcome": "correct",
       "sha256": "22382ca7be224546d442ffb5c84c26b98086639975ea2a3d324c60c935d1d8b8"
     },
-    "note": "Correct answer from the full-context dev run."
+    "note": "Real answer with the right headline numbers but two unsupported claims: no orders before 2017-01-05 (read from a query filtered to 2017, while the docs say the data starts 2016-09-04) and a marketplace ramp-up in early 2017 that no query supports.",
+    "label_history": [
+      {
+        "date": "2026-11-24",
+        "from": {
+          "expected_verdict": "approve",
+          "expected_failed_checks": [],
+          "note": "Correct answer from the full-context dev run."
+        },
+        "to": {
+          "expected_verdict": "revise",
+          "expected_failed_checks": [
+            "claims_beyond_data"
+          ],
+          "note": "Real answer with the right headline numbers but two unsupported claims: no orders before 2017-01-05 (read from a query filtered to 2017, while the docs say the data starts 2016-09-04) and a marketplace ramp-up in early 2017 that no query supports."
+        },
+        "reason": "The response says \"The data has no orders before 2017-01-05\", but query 1 is filtered to 2017 and docs/metrics.md says the data starts 2016-09-04; it also says \"Early 2017 also reflects the marketplace ramp-up\", which no query supports.",
+        "source": "corrected after reading reviewer v1 findings"
+      }
+    ]
   },
   {
     "id": "q001.threshold_off_by_one",
@@ -829,8 +850,10 @@
     "fault_type": null,
     "base_case": null,
     "edits": null,
-    "expected_verdict": "approve",
-    "expected_failed_checks": [],
+    "expected_verdict": "revise",
+    "expected_failed_checks": [
+      "claims_beyond_data"
+    ],
     "source": {
       "run": "20261121T174710Z_dev_v3-harder",
       "git_sha": "27f44c8b81e9b4577a6308395c148da9e42706e7",
@@ -838,7 +861,26 @@
       "outcome": "correct",
       "sha256": "76dbc693351275ef867f4788471cc093bf9c6d73360cac0cc38a2689efd21957"
     },
-    "note": "Correct answer from the full-context dev run."
+    "note": "Real answer with the right headline but an unsupported volume claim: bed_bath_table would lead by volume, from a query that ranks by revenue with LIMIT 5.",
+    "label_history": [
+      {
+        "date": "2026-11-24",
+        "from": {
+          "expected_verdict": "approve",
+          "expected_failed_checks": [],
+          "note": "Correct answer from the full-context dev run."
+        },
+        "to": {
+          "expected_verdict": "revise",
+          "expected_failed_checks": [
+            "claims_beyond_data"
+          ],
+          "note": "Real answer with the right headline but an unsupported volume claim: bed_bath_table would lead by volume, from a query that ranks by revenue with LIMIT 5."
+        },
+        "reason": "The response says bed_bath_table would lead by volume, but query 1 ranks categories by revenue with LIMIT 5, so categories outside the revenue top 5 were never compared by volume.",
+        "source": "corrected after reading reviewer v1 findings"
+      }
+    ]
   },
   {
     "id": "q019.ok",

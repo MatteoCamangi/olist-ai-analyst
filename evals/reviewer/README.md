@@ -23,15 +23,38 @@ were appended after them. Each batch is sorted by id.
 
 | Origin | Count | Source | Expected verdict |
 |---|---|---|---|
-| natural | 10 | answers of the full-context dev run `20261121T174710Z_dev_v3-harder` (12/12 correct), untouched | approve |
+| natural | 10 | answers of the full-context dev run `20261121T174710Z_dev_v3-harder` (12/12 correct), untouched | approve (8), revise (2: q001.ok and q018.ok, see Label corrections) |
 | natural | 1 | q010 of `20261122T170925Z_dev_grid-raw-bare` (raw scope, no docs, minimal brief): late rate on timestamps, AL 23.93% instead of 21.41% | reject (definitions) |
 | injected | 18 | a copy of one approve case with deterministic edits: 10 fault types, two variants on different bases for eight of them | reject or revise |
 
-**Verdict counts: approve 10, revise 10, reject 9.**
+**Verdict counts: approve 8, revise 12, reject 9** (before the label corrections of 2026-11-24: approve 10, revise 10).
 
 q007 and q011 of the v3-harder run are left out. Their traces list a few ids (rows past the dev cut-off) that are
 also hidden expected values and are neither dev expected values nor in the public docs. Including them untouched
 would put hidden answer values in this folder.
+
+## Label corrections
+
+Two natural cases were relabelled after reading the findings of the first reviewer runs (reviewer v1,
+`20261122T192400Z` and `20261122T213059Z`). This is a post-hoc change, so it is recorded in the cases
+(`label_history`) and every summary reports metrics under both label sets.
+
+| Case | Was | Now | Reason |
+|---|---|---|---|
+| q001.ok | approve | revise, claims_beyond_data | The response says "The data has no orders before 2017-01-05", but query 1 is filtered to 2017 and docs/metrics.md says the data starts 2016-09-04. It also says "Early 2017 also reflects the marketplace ramp-up", which no query supports. |
+| q018.ok | approve | revise, claims_beyond_data | The response says bed_bath_table would lead by volume, but query 1 ranks categories by revenue with LIMIT 5, so categories outside the revenue top 5 were never compared by volume. |
+
+Both corrections are dated 2026-11-24 with the source "corrected after reading reviewer v1 findings". The headline
+answers (orders, revenue, best category) are right; the flaws are claims around them, so the verdict is revise.
+
+**Metrics under two label sets.** Summaries report the corrected labels as the headline (`metrics`, `per_fault_type`,
+`per_check`, `confusion`, `label_view: "corrected"`) and the original labels under `original_labels`. Scores before
+and after the correction stay comparable.
+
+**Injected cases on these bases are not single-fault cases.** q001.threshold_off_by_one, q001.unsupported_claim,
+q018.missing_assumption and q018.wrong_filter were built from q001.ok and q018.ok and inherit their unsupported
+claims. Their labels are unchanged: they are judged on the injected fault, and a reviewer that also flags the
+inherited claim is not penalised (extra flags cost nothing in `check_recall`).
 
 ## Schema
 
@@ -54,6 +77,7 @@ would put hidden answer values in this folder.
 | `expected_failed_checks` | list | empty for approve; otherwise check names from the list below |
 | `source` | object | `run`, `git_sha`, `agent_config`, graded `outcome` and `sha256` of the original response and trace. An injected case keeps its base's source |
 | `note` | string | one sentence on why the case has this verdict |
+| `label_history` | list (only on corrected cases) | each correction: `date`, `from` and `to` (`expected_verdict`, `expected_failed_checks`, `note`), `reason`, `source` |
 
 No expected values, gold SQL or grader reasons are copied into the cases.
 
@@ -160,6 +184,7 @@ never guessed.
 ```
 python evals/reviewer/run_reviewer_eval.py --label baseline
 python evals/reviewer/run_reviewer_eval.py --label quick --only q013.ok,q013.wrong_filter
+python evals/reviewer/run_reviewer_eval.py --rescore evals/reviewer/runs/detail/<run>.json   # no agent calls
 python evals/reviewer/test_reviewer.py         # tests, fake client and fake agents only
 ```
 
@@ -174,23 +199,50 @@ The runner starts `--agent-cmd` (default `python agent/reviewer.py`) once per ca
 | `soft_miss` | reject instead of revise, or revise instead of reject | cases expected revise or reject |
 | `check_recall` | every expected check is among the flagged checks (extra flags cost nothing) | cases with expected checks |
 | `evidence_valid` | every finding passes the evidence rule | cases with at least one finding |
-| `invented_numbers` | a finding's evidence or fix has a number found in no source | cases with at least one finding |
+| `invented_numbers` | a finding's evidence or fix has a number found in no source and not derived | cases with at least one finding |
+| `derived_numbers` | a finding's evidence or fix has a number that is the sum or difference of two numbers from the response and trace | cases with at least one finding |
 | `format_error`, `agent_failure` | the reviewer returned a format error, or crashed, timed out or printed no JSON object | all cases |
 
 A format error or agent failure never counts as a dangerous miss or a false alarm; it fails `verdict_match` and
 `check_recall`.
 
-**Evidence rule.** Texts are compared after lowercasing and collapsing whitespace. The sources are the response, each
-query's SQL and result, docs/metrics.md and evals/ANSWER_FORMAT.md. A finding's evidence is valid when (a) every
-query reference (`query N`, `queries N and M`, `Q N`) points to a query that exists (1 to the number of queries),
-(b) every quoted span (`"..."`, `“...”` or `` `...` ``) of 4 or more characters occurs in a source, and (c) there is
-an anchor: a valid query reference, a found quoted span, or the whole evidence (8 or more characters) found in a
-source.
+Scoring rules below are **scorer version 2** (`scorer_version` in every summary). Summaries without the field were
+scored by version 1 (plain double quotes and backticks only, no ellipsis handling, ANSWER_FORMAT.md numbers counted as
+sources, no derived numbers).
 
-**Invented-number rule.** Numbers are read from each finding's evidence and fix (`-?\d[\d,]*(\.\d+)?%?`, commas and
-`%` dropped), leaving out query references and whole numbers from 0 to 10. A number is supported when some number in
-the sources equals it, or rounds to it at its own number of decimals (display rounding: 21.4 is supported by 21.41).
-The docs' illustrative example values count as sources, so a number copied from them is not caught.
+**Normalisation.** Both the evidence and the sources are compared after: Unicode NFKD with accents dropped, curly
+apostrophes mapped to `'`, straight and curly double quotes removed, `**`, `__` and backticks removed, lowercased,
+whitespace collapsed.
+
+**Evidence rule.** The sources are the response, each query's SQL and result, docs/metrics.md and
+evals/ANSWER_FORMAT.md. A finding's evidence is valid when:
+
+- (a) every query reference (`query N`, `queries N and M`, `Q N`) points to a query that exists (1 to the number of
+  queries);
+- (b) every quoted span occurs in a source. Quoted spans are `"..."`, `“...”`, `` `...` `` and single-quoted
+  `'...'`, where the opening `'` must follow the start of the text, a space, `:`, `(` or `[`, and the closing `'`
+  must precede a space, punctuation or the end (so the apostrophe in "Olist's" never opens a span). A span is split
+  at `...`, `…` and `[...]`; every piece of 4 or more characters must occur, all in the same source. A span with no
+  such piece is ignored;
+- (c) there is an anchor: a valid query reference, a found quoted span, or the whole evidence (8 or more characters)
+  found in a source.
+
+The anchor rule is not loosened: an accurate paraphrase with no query reference and no quote fails, and so does a
+quotation that is not in the inputs (for example "6,610 delivered orders" when the response says "with 6,610").
+
+**Number rules.** Numbers are read from each finding's evidence and fix (`-?\d[\d,]*(\.\d+)?%?`, commas and `%`
+dropped), leaving out query references and whole numbers from 0 to 10. Number sources are the response, the trace
+(SQL and results) and docs/metrics.md; the illustrative values in evals/ANSWER_FORMAT.md are not sources. A number is
+supported when a source number equals it or rounds to it at its own number of decimals (21.4 is supported by 21.41).
+An unsupported number is **derived** when it equals the sum or difference of two numbers from the response and trace
+(for example 0.13 = 4400.0 − 4399.87), and **invented** otherwise. Derived numbers are reported separately from
+invented ones: the brief says never to state a corrected number that is not in the trace, so they are worth seeing,
+but they are not made up.
+
+**Rescoring.** `--rescore DETAIL` re-scores the reviewer outputs saved in a detail file with the current scorer and the
+current labels, without calling the agent. It writes a new summary and detail labelled `<label>-rescored`, with
+`rescored_from`, `original_timestamp`, `original_git_sha` and `scorer_version`; files are opened in exclusive mode, so
+an existing run is never overwritten.
 
 Outputs: `evals/reviewer/runs/<UTC timestamp>_<label>.json` (committed: counts and rates as `{n, of, rate}`, tables
 per fault type and per check, the expected × got confusion matrix, token totals, `agent_config` with the model from

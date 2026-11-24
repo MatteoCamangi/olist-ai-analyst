@@ -95,7 +95,8 @@ def test_required_fields_and_values():
     ids = [c["id"] for c in CASES]
     assert ids[:17] == sorted(ids[:17]) and ids[17:] == sorted(ids[17:]), "each batch is sorted by id"
     for c in CASES:
-        assert set(c) == set(FIELDS), (c["id"], set(c) ^ set(FIELDS))
+        allowed = set(FIELDS) | ({"label_history"} if c["id"] in mf.LABEL_CORRECTIONS else set())
+        assert set(c) == allowed, (c["id"], set(c) ^ allowed)
         for key, kind in FIELDS.items():
             assert isinstance(c[key], kind), (c["id"], key)
         assert set(c["source"]) == SOURCE_FIELDS, c["id"]
@@ -108,16 +109,48 @@ def test_required_fields_and_values():
         assert any(e.get("event") == "sql" for e in c["trace"]), c["id"]
     assert {c["fault_type"] for c in CASES if c["fault_type"]} == set(mf.FAULT_TYPES)
     natural = [c for c in CASES if c["origin"] == "natural"]
-    assert sum(c["expected_verdict"] == "approve" for c in natural) == 10
+    assert sum(c["expected_verdict"] == "approve" for c in natural) == 8
+    assert sorted(c["id"] for c in natural if c["expected_verdict"] == "revise") == ["q001.ok", "q018.ok"]
     assert BY_ID["q010.raw-bare"]["expected_verdict"] == "reject"
     assert BY_ID["q010.raw-bare"]["expected_failed_checks"] == ["definitions"]
 
 
+def undo_corrections(cases):
+    """The cases as they were before the recorded label corrections."""
+    out = []
+    for c in cases:
+        c = json.loads(json.dumps(c))
+        history = c.pop("label_history", None)
+        if history:
+            c.update(history[0]["from"])
+        out.append(c)
+    return out
+
+
 def test_first_17_cases_unchanged():
+    """Only the recorded label corrections changed the first 17 cases: undoing them gives the frozen bytes."""
     assert [c["id"] for c in CASES[:17]] == FIRST_17_IDS
-    blob = json.dumps(CASES[:17], indent=2, ensure_ascii=False).encode()
-    assert hashlib.sha256(blob).hexdigest() == FIRST_17_SHA256, "the first 17 cases changed"
+    blob = json.dumps(undo_corrections(CASES[:17]), indent=2, ensure_ascii=False).encode()
+    assert hashlib.sha256(blob).hexdigest() == FIRST_17_SHA256, "the first 17 cases changed beyond the corrections"
+    current = json.dumps(CASES[:17], indent=2, ensure_ascii=False).encode()
+    assert hashlib.sha256(current).hexdigest() != FIRST_17_SHA256
     assert CASES_TEXT.startswith(mf.render(CASES[:17])[:-3]), "the first 17 cases are not a prefix of the file"
+
+
+def test_label_corrections():
+    corrected = [c for c in CASES if c.get("label_history")]
+    assert sorted(c["id"] for c in corrected) == ["q001.ok", "q018.ok"] == sorted(mf.LABEL_CORRECTIONS)
+    for c in corrected:
+        (entry,) = c["label_history"]
+        assert set(entry) == {"date", "from", "to", "reason", "source"}, entry
+        assert entry["date"] == "2026-11-24" and entry["source"] == "corrected after reading reviewer v1 findings"
+        assert entry["from"]["expected_verdict"] == "approve" and entry["from"]["expected_failed_checks"] == []
+        assert entry["to"] == {k: c[k] for k in ("expected_verdict", "expected_failed_checks", "note")}
+        assert c["expected_verdict"] == "revise" and c["expected_failed_checks"] == ["claims_beyond_data"]
+        assert c["origin"] == "natural" and len(entry["reason"]) > 40
+    for c in CASES:
+        if c["origin"] == "injected":
+            assert "label_history" not in c, c["id"]  # injected cases on corrected bases stay unchanged
 
 
 def test_fault_variants():
@@ -153,7 +186,7 @@ def test_every_brief_check_has_two_cases():
         n = sum(check in c["expected_failed_checks"] for c in CASES)
         assert n >= 2, (check, n)
     counts = {v: sum(c["expected_verdict"] == v for c in CASES) for v in mf.VERDICTS}
-    assert counts == {"approve": 10, "revise": 10, "reject": 9}, counts
+    assert counts == {"approve": 8, "revise": 12, "reject": 9}, counts
 
 
 def test_verdicts_follow_the_brief():
@@ -215,7 +248,8 @@ def test_injected_cases_differ_only_by_their_edits():
         if c["origin"] != "injected":
             continue
         base = BY_ID[c["base_case"]]
-        assert base["origin"] == "natural" and base["expected_verdict"] == "approve", c["id"]
+        base_label = (base.get("label_history") or [{"from": base}])[0]["from"]["expected_verdict"]
+        assert base["origin"] == "natural" and base_label == "approve", c["id"]  # approve when injected
         assert base["source_question"] == c["source_question"], c["id"]
         assert c["id"] == f"{c['source_question']}.{c['fault_type']}"
         same = ("source_question", "split", "question", "answer_schema", "source")
@@ -232,6 +266,13 @@ def test_injected_cases_differ_only_by_their_edits():
         touches_sql = any(e["scope"] == "sql" for e in c["edits"])
         sql = [e["sql"] for e in c["trace"] if e.get("event") == "sql"]
         assert (sql != [e["sql"] for e in base["trace"] if e.get("event") == "sql"]) == touches_sql, c["id"]
+
+
+def test_sql_check_tolerates_only_float_noise():
+    assert mf._same_cell("13221498.11000009", "13221498.11000013")  # parallel float sum, last digits vary
+    for a, b in (("13.27", "13.28"), ("6601", "6610"), ("1255695.13", "1233131.72"), ("AL", "MA"), ("0", "")):
+        assert not mf._same_cell(a, b), (a, b)
+    assert not mf._same_row(["1", "2"], ["1"])
 
 
 def test_rebuild_is_deterministic():
