@@ -1,8 +1,8 @@
 {
-  "timestamp": "20261124T161751Z",
+  "timestamp": "20261124T165732Z",
   "label": "reviewer-v1-sonnet-rescored",
   "scorer_version": 3,
-  "git_sha": "e09beac8f6c7199fbfe79cbd0ffc76fe6d5fd5e8",
+  "git_sha": "680cebb67801807b394f4db4953f7fccfd426d03",
   "git_dirty": true,
   "agent_cmd": "python agent/reviewer.py",
   "cases_file": "/workspaces/olist-ai-analyst/evals/reviewer/cases.json",
@@ -17,33 +17,34 @@
   "label_view": "corrected",
   "label_corrections": [
     "q001.ok",
+    "q010.ok",
     "q018.ok"
   ],
   "metrics": {
     "verdict_match": {
-      "n": 28,
+      "n": 27,
       "of": 29,
-      "rate": 0.9655
+      "rate": 0.931
     },
     "dangerous_miss": {
-      "n": 1,
-      "of": 21,
-      "rate": 0.0476
+      "n": 2,
+      "of": 22,
+      "rate": 0.0909
     },
     "false_alarm": {
       "n": 0,
-      "of": 8,
+      "of": 7,
       "rate": 0.0
     },
     "soft_miss": {
       "n": 0,
-      "of": 21,
+      "of": 22,
       "rate": 0.0
     },
     "check_recall": {
       "n": 21,
-      "of": 21,
-      "rate": 1.0
+      "of": 22,
+      "rate": 0.9545
     },
     "evidence_valid": {
       "n": 24,
@@ -181,10 +182,10 @@
       }
     },
     "natural_approve": {
-      "n": 8,
+      "n": 7,
       "verdict_match": {
-        "n": 8,
-        "of": 8,
+        "n": 7,
+        "of": 7,
         "rate": 1.0
       },
       "dangerous_miss": {
@@ -217,21 +218,21 @@
       }
     },
     "natural_revise": {
-      "n": 2,
+      "n": 3,
       "verdict_match": {
         "n": 2,
-        "of": 2,
-        "rate": 1.0
+        "of": 3,
+        "rate": 0.6667
       },
       "dangerous_miss": {
-        "n": 0,
-        "of": 2,
-        "rate": 0.0
+        "n": 1,
+        "of": 3,
+        "rate": 0.3333
       },
       "check_recall": {
         "n": 2,
-        "of": 2,
-        "rate": 1.0
+        "of": 3,
+        "rate": 0.6667
       }
     },
     "number_mismatch": {
@@ -330,7 +331,7 @@
       "expected": 5,
       "recalled": 5,
       "flagged": 18,
-      "flagged_on_approve": 2
+      "flagged_on_approve": 1
     },
     "refusals_false_premises": {
       "expected": 2,
@@ -339,7 +340,7 @@
       "flagged_on_approve": 0
     },
     "claims_beyond_data": {
-      "expected": 6,
+      "expected": 7,
       "recalled": 6,
       "flagged": 14,
       "flagged_on_approve": 1
@@ -353,14 +354,14 @@
   },
   "confusion": {
     "approve": {
-      "approve": 8,
+      "approve": 7,
       "revise": 0,
       "reject": 0,
       "format_error": 0,
       "agent_failure": 0
     },
     "revise": {
-      "approve": 1,
+      "approve": 2,
       "revise": 11,
       "reject": 0,
       "format_error": 0,
