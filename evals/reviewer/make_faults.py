@@ -38,6 +38,28 @@ CASES = HERE / "cases.json"
 DB_PATH = ROOT / "warehouse.duckdb"
 GOOD_RUN = "20261121T174710Z_dev_v3-harder"
 EXCLUDED = ("q007", "q011")  # their traces contain ids that appear only in hidden expected answers
+# Post-hoc label corrections, documented in the README. Applied after the injected cases are built, so the injected
+# cases on these bases are unchanged; each corrected case records its original label in label_history.
+CORRECTION_DATE = "2026-11-24"
+CORRECTION_SOURCE = "corrected after reading reviewer v1 findings"
+LABEL_CORRECTIONS = {
+    "q001.ok": {
+        "expected_verdict": "revise", "expected_failed_checks": ["claims_beyond_data"],
+        "note": "Real answer with the right headline numbers but two unsupported claims: no orders before 2017-01-05 "
+                "(read from a query filtered to 2017, while the docs say the data starts 2016-09-04) and a "
+                "marketplace ramp-up in early 2017 that no query supports.",
+        "reason": "The response says \"The data has no orders before 2017-01-05\", but query 1 is filtered to 2017 and "
+                  "docs/metrics.md says the data starts 2016-09-04; it also says \"Early 2017 also reflects the "
+                  "marketplace ramp-up\", which no query supports.",
+    },
+    "q018.ok": {
+        "expected_verdict": "revise", "expected_failed_checks": ["claims_beyond_data"],
+        "note": "Real answer with the right headline but an unsupported volume claim: bed_bath_table would lead by "
+                "volume, from a query that ranks by revenue with LIMIT 5.",
+        "reason": "The response says bed_bath_table would lead by volume, but query 1 ranks categories by revenue "
+                  "with LIMIT 5, so categories outside the revenue top 5 were never compared by volume.",
+    },
+}
 NATURAL = {"run": "20261122T170925Z_dev_grid-raw-bare", "question": "q010", "id": "q010.raw-bare",
            "verdict": "reject", "checks": ["definitions"],
            "note": "Compares delivery and estimate timestamps instead of calendar dates, so the late rate is "
@@ -409,10 +431,26 @@ def verify_sql(con, trace, label):
         if e.get("event") != "sql":
             continue
         rows = con.execute(e["sql"]).fetchall()
-        got = ["\t".join(_cell(v) for v in r) for r in rows]
-        lines = results[e["tool_use_id"]].splitlines()
-        if got != lines[1:1 + len(got)]:
+        got = [[_cell(v) for v in r] for r in rows]
+        recorded = [line.split("\t") for line in results[e["tool_use_id"]].splitlines()[1:1 + len(got)]]
+        if len(recorded) != len(got) or not all(_same_row(a, b) for a, b in zip(got, recorded)):
             raise SystemExit(f"make_faults: {label}: the SQL in the trace does not return its recorded result")
+
+
+def _same_cell(a, b):
+    """Exact text, except floats: DuckDB sums doubles in parallel, so the last digits of an unrounded float sum
+    (e.g. 13221498.11000009 vs ...13) vary between runs. Numbers match within a relative 1e-12."""
+    if a == b:
+        return True
+    try:
+        x, y = float(a), float(b)
+    except ValueError:
+        return False
+    return abs(x - y) <= 1e-12 * max(1.0, abs(x), abs(y))
+
+
+def _same_row(a, b):
+    return len(a) == len(b) and all(_same_cell(x, y) for x, y in zip(a, b))
 
 
 def fault_case(spec, base_case, con):
@@ -462,8 +500,23 @@ def build():
             target[case["id"]] = case
     finally:
         con.close()
+    for case_id, fix in LABEL_CORRECTIONS.items():
+        apply_label_correction(cases[case_id], fix)
     # batch 1 first, exactly as first committed; later cases are appended
     return [cases[k] for k in sorted(cases)] + [added[k] for k in sorted(added)]
+
+
+def apply_label_correction(case, fix):
+    """Change a natural case's label in place and record the original in label_history."""
+    if case["origin"] != "natural" or case.get("label_history"):
+        raise SystemExit(f"make_faults: {case['id']}: only an uncorrected natural case can be corrected")
+    keys = ("expected_verdict", "expected_failed_checks", "note")
+    before, after = {k: case[k] for k in keys}, {k: fix[k] for k in keys}
+    if fix["expected_verdict"] not in VERDICTS or not set(fix["expected_failed_checks"]) <= set(CHECKS):
+        raise SystemExit(f"make_faults: {case['id']}: unknown verdict or check in the correction")
+    case.update(after)
+    case["label_history"] = [{"date": CORRECTION_DATE, "from": before, "to": after, "reason": fix["reason"],
+                              "source": CORRECTION_SOURCE}]
 
 
 def render(cases):
