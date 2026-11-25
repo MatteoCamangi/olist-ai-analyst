@@ -238,3 +238,5 @@ evals/reviewer/runs/detail/
 # Reviewer held-out set (built locally from hidden answers; never commit)
 evals/reviewer/heldout/cases.heldout.json
 evals/reviewer/heldout/key.heldout.json
+# Pipeline side files (handoff of withheld answers) when PIPELINE_RESULT_FILE is not set
+pipeline_results/
