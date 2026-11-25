@@ -168,6 +168,181 @@ def test_only_hidden_items_accepted():
             raise AssertionError("a dev item was accepted")
 
 
+# -- runner --heldout ------------------------------------------------------------------------------------
+
+RUNNER = HERE.parent / "run_reviewer_eval.py"
+PLAN = {  # response marker -> (verdict or "format", key fields)
+    "R1": ("reject", "expected_reject", "v3-harder", "q901"), "R2": ("revise", "expected_reject", "v3-harder", "q901"),
+    "R3": ("approve", "expected_reject", "abl-floor", "q902"), "R4": ("format", "expected_reject", "abl-floor", "q903"),
+    "R5": ("approve", "unlabelled_correct", "v3-harder", "q904"), "R6": ("revise", "unlabelled_correct", "abl-floor", "q904"),
+    "R7": ("reject", "unlabelled_correct", "abl-floor", "q901"), "R8": ("approve", "unlabelled_correct", "v3-harder", "q902"),
+}
+AGENTS = {
+    "planned": """
+import json, re, sys
+case = json.loads(sys.stdin.read())
+marker = re.search(r"R[0-9]", case["response"]).group()
+verdict = json.loads(open(__file__.replace("planned.py", "plan.json")).read())[marker][0]
+if verdict == "format":
+    print(json.dumps({"verdict": None, "error": "format_error"}))
+else:
+    findings = [] if verdict == "approve" else [
+        {"check": "definitions", "severity": "high", "evidence": "query 1", "fix": "Fix it."}]
+    print(json.dumps({"verdict": verdict, "reason": "r", "findings": findings}))
+print('USAGE {"input_tokens": 100, "output_tokens": 10, "model": "claude-fake"}', file=sys.stderr)
+""",
+    "recorder": """
+import json, sys
+raw = sys.stdin.read()
+with open(__file__.replace("recorder.py", "stdin.jsonl"), "a") as f:
+    f.write(raw.replace("\\n", " ") + "\\n")
+print(json.dumps({"verdict": "approve", "reason": "ok", "findings": []}))
+print('USAGE {"input_tokens": 1, "output_tokens": 1, "model": "claude-fake"}', file=sys.stderr)
+""",
+    "crasher": """
+import sys
+sys.stdin.read()
+sys.exit(2)
+""",
+}
+SUMMARY_KEYS = {"heldout", "timestamp", "label", "git_sha", "git_dirty", "scorer_version", "model", "brief_sha256",
+                "reviewer_sha256", "agent_cmd", "earlier_heldout_runs", "n_cases", "expected_reject",
+                "unlabelled_correct", "per_source_label", "overall", "tokens"}
+
+
+class HeldoutEnv:
+    def __init__(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.repo, self.runs = self.dir / "repo", self.dir / "runs"
+        self.repo.mkdir()
+        git = lambda *a: subprocess.run(["git", *a], cwd=self.repo, capture_output=True, text=True, check=True)
+        git("init", "-q")
+        (self.repo / "README").write_text("x\n")
+        git("add", "README")
+        git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init")
+        cases, key = [], {}
+        for n, (marker, (verdict, group, label, qid)) in enumerate(sorted(PLAN.items()), 1):
+            hid = f"h{n:03d}"
+            cases.append({"id": hid, "question": f"{QMARK} {n}?", "answer_schema": {"answer": {"n": "integer"}},
+                          "response": f"{RMARK} {marker} the answer is {n}.", "trace": sql_trace(n)})
+            key[hid] = {"source_label": label, "source_run": f"run_{label}", "question_id": qid, "outcome": "x",
+                        "manual_review": False, "group": group,
+                        "expected_verdict": "reject" if group == "expected_reject" else None}
+        self.cases, self.key = self.dir / "cases.json", self.dir / "key.json"
+        self.cases.write_text(json.dumps(cases))
+        self.key.write_text(json.dumps(key))
+        (self.dir / "plan.json").write_text(json.dumps(PLAN))
+        for name, code in AGENTS.items():
+            (self.dir / f"{name}.py").write_text(code)
+
+    def run(self, *args, agent="planned", confirm=True, heldout=True):
+        argv = [sys.executable, str(RUNNER), "--runs-dir", str(self.runs), "--repo", str(self.repo),
+                "--heldout-cases", str(self.cases), "--heldout-key", str(self.key),
+                "--agent-cmd", f'"{sys.executable}" "{self.dir / f"{agent}.py"}"']
+        argv += (["--heldout"] if heldout else []) + (["--confirm-heldout"] if confirm else []) + list(args)
+        return subprocess.run(argv, capture_output=True, text=True, timeout=300, cwd=ROOT)
+
+    def files(self):
+        return sorted(self.runs.rglob("*.json")) if self.runs.exists() else []
+
+    def close(self):
+        self.tmp.cleanup()
+
+
+def with_heldout(fn):
+    def wrapper():
+        env = HeldoutEnv()
+        try:
+            fn(env)
+        finally:
+            env.close()
+    wrapper.__name__ = fn.__name__
+    return wrapper
+
+
+def no_case_content(text):
+    assert QMARK not in text and RMARK not in text and "SELECT" not in text and "Fix it." not in text
+    assert not re.search(r"\bh\d{3}\b", text), "opaque ids leaked"
+    assert not re.search(r"\bq9\d\d\b", text), "question ids leaked"
+
+
+@with_heldout
+def test_heldout_refusals(env):
+    p = env.run("--label", "x", confirm=False)
+    assert p.returncode == 2 and "--confirm-heldout" in p.stderr and not env.files()
+    (env.repo / "untracked.txt").write_text("dirty")
+    p = env.run("--label", "x")
+    assert p.returncode == 2 and "dirty" in p.stderr and not env.files()
+    (env.repo / "untracked.txt").unlink()
+    for extra in (("--label", "x", "--only", "h001"), ("--label", "x", "--show", "h001"), ()):
+        p = env.run(*extra)
+        assert p.returncode == 2, (extra, p.returncode)
+    p = env.run("--label", "x", "--show", "h001")
+    assert "unrecognized arguments: --show" in p.stderr  # no --show option exists
+    p = env.run("--label", "x", "--confirm-heldout", heldout=False, confirm=False)
+    assert p.returncode == 2 and "only goes with --heldout" in p.stderr
+    assert not env.files()
+
+
+@with_heldout
+def test_heldout_scoring_and_summary(env):
+    p = env.run("--label", "v2-final")
+    assert p.returncode == 0, p.stderr[-800:]
+    (summary_path,) = [f for f in env.files() if f.parent == env.runs]
+    assert summary_path.name.endswith("_v2-final_heldout.json")
+    summary = json.loads(summary_path.read_text())
+    assert set(summary) == SUMMARY_KEYS, set(summary) ^ SUMMARY_KEYS
+    er, uc = summary["expected_reject"], summary["unlabelled_correct"]
+    assert (er["n"], er["rejected"], er["revised"], er["approved"], er["format_error"]) == (4, 1, 1, 1, 1)
+    assert er["distinct_questions"] == 3 and er["approved_distinct_questions"] == 1
+    assert er["rates"]["approved"] == 0.25
+    assert (uc["n"], uc["approved"], uc["revised"], uc["rejected"], uc["format_error"]) == (4, 2, 1, 1, 0)
+    assert "distinct_questions" not in uc
+    per = summary["per_source_label"]
+    assert set(per) == {"v3-harder", "abl-floor"}
+    assert (per["v3-harder"]["expected_reject"]["rejected"], per["v3-harder"]["expected_reject"]["revised"]) == (1, 1)
+    assert (per["abl-floor"]["expected_reject"]["approved"], per["abl-floor"]["expected_reject"]["format_error"]) == (1, 1)
+    assert (per["abl-floor"]["unlabelled_correct"]["revised"], per["abl-floor"]["unlabelled_correct"]["rejected"]) == (1, 1)
+    o = summary["overall"]
+    assert o["format_error"] == {"n": 1, "of": 8, "rate": 0.125} and o["evidence_valid"] == {"n": 4, "of": 4, "rate": 1.0}
+    assert o["invented_numbers"]["n"] == 0 and o["agent_failure"]["n"] == 0
+    assert summary["tokens"] == {"input_tokens": 800, "output_tokens": 80} and summary["model"] == "claude-fake"
+    assert summary["heldout"] is True and summary["earlier_heldout_runs"] == 0 and summary["git_dirty"] is False
+    assert len(summary["brief_sha256"]) == len(summary["reviewer_sha256"]) == 64
+    for text in (summary_path.read_text(), p.stdout, p.stderr):
+        no_case_content(text)
+    assert "dangerous miss" in p.stdout and "clear false alarm" in p.stdout
+    detail = json.loads((env.runs / "detail" / summary_path.name).read_text())
+    assert len(detail["cases"]) == 8 and detail["heldout"] is True  # per-case outputs live only in the detail file
+    p2 = env.run("--label", "again")
+    assert p2.returncode == 0 and json.loads(sorted(env.runs.glob("*again_heldout.json"))[0].read_text())[
+        "earlier_heldout_runs"] == 1
+    r = subprocess.run([sys.executable, str(RUNNER), "--runs-dir", str(env.runs), "--rescore",
+                        str(env.runs / "detail" / summary_path.name)], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode != 0 and "held-out detail file cannot be rescored" in r.stderr
+
+
+@with_heldout
+def test_heldout_agent_gets_reviewer_fields_only(env):
+    p = env.run("--label", "rec", agent="recorder")
+    assert p.returncode == 0, p.stderr[-500:]
+    lines = (env.dir / "stdin.jsonl").read_text().splitlines()
+    assert len(lines) == 8
+    for line in lines:
+        assert set(json.loads(line)) == {"question", "answer_schema", "response", "trace"}
+        assert not re.search(r"\bh\d{3}\b", line)
+        for word in KEY_WORDS:
+            assert word not in line, word
+
+
+@with_heldout
+def test_heldout_guard(env):
+    p = env.run("--label", "crash", agent="crasher")
+    assert p.returncode == 3 and "summary not saved" in p.stderr and not env.files()
+    no_case_content(p.stdout + p.stderr)
+
+
 # ---------------------------------------------------------------------------------------------------------
 
 def main():
