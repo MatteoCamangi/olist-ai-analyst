@@ -359,3 +359,60 @@ Under the original labels, v2 matches v1 on verdicts (26/29) and removes the dan
 at the cost of one more false alarm: q010.ok, the case later relabelled. Under the corrected labels both v2 runs match
 every verdict. Read the corrected column with the bias risk in mind: all three corrections came from reviewer
 findings.
+
+## Held-out test
+
+The dev cases above tuned the reviewer: two label rounds and brief v2 were all shaped by reading reviewer findings on
+them. The held-out test measures the reviewer on answers it has never been tuned on: the analyst's saved answers to
+the **hidden** questions.
+
+**Design.**
+- `heldout/build_heldout.py` reads the hidden analyst runs labelled v3-harder, abl-floor, grid-marts-bare and
+  grid-raw-bare: the committed summary in evals/runs/ and its gitignored detail file. A run whose detail file is
+  missing is skipped and named by label.
+- Each hidden answer becomes a case with the same reviewer fields as the dev cases (question, answer_schema,
+  response, trace) and an opaque id (h001, h002, …) assigned after a shuffle with a fixed seed.
+- Answers graded format_error or incomplete_refusal are left out: there is no real answer to review.
+- The cases (`heldout/cases.heldout.json`) and the key (`heldout/key.heldout.json`: source run, question id, grader
+  outcome, manual-review flag, group) are written locally and gitignored. Only aggregates are printed.
+
+**Labels.**
+- An answer the grader marked wrong_confident or false_refusal is **expected reject**: its headline is wrong or
+  withheld. Approving it is a dangerous miss.
+- An answer the grader marked correct is **unlabelled**. A correct headline can still carry unsupported side claims,
+  which is exactly what the dev label corrections kept finding, so revise is not an error there. It is reported as
+  ambiguous. Reject on a grader-correct answer is reported as a clear false alarm.
+
+**Running it.**
+- `run_reviewer_eval.py --heldout --confirm-heldout --label <label>` refuses to run without the confirmation flag or
+  on a dirty git tree.
+- It sends the reviewer only the four reviewer fields; the opaque id and the key never reach it.
+- It prints and commits aggregates only (`runs/<timestamp>_<label>_heldout.json`): counts and rates per group and per
+  source label, distinct questions, evidence and number checks, tokens, model, scorer version, the sha256 of
+  agent/REVIEWER_BRIEF.md and agent/reviewer.py, and the number of earlier held-out runs.
+- Per-case reviewer outputs stay in the gitignored detail file. There is no option to show held-out cases, and
+  held-out detail cannot be rescored.
+
+**Rules.**
+- One shot: run it once, with brief v2 and the reviewer as committed.
+- No change to the brief or the reviewer is made because of the result.
+- If anything is changed and the held-out run is repeated, the set is burned. `earlier_heldout_runs` records how many
+  runs came before, and every later score must be read with that count.
+- Nobody opens the held-out cases, key or detail while working on the reviewer.
+
+**Caveats.**
+- The wrong answers are not independent. The analyst gets the same few hidden questions wrong across runs, so several
+  expected-reject cases share a question. Report counts together with `distinct_questions` (and the distinct
+  questions among dangerous misses), not only rates.
+- Labels come from the analyst grader, not from a human review of each answer. A grader-correct answer is unlabelled,
+  and a grader-wrong answer is assumed to deserve reject.
+- The reviewer was tuned on the dev cases only. The held-out score is the estimate that counts, and the dev scores
+  overstate it.
+
+Commands (from the repo root, with a clean tree):
+
+```
+python evals/reviewer/heldout/build_heldout.py
+python evals/reviewer/run_reviewer_eval.py --heldout --confirm-heldout --label reviewer-v2-sonnet
+python evals/reviewer/heldout/test_heldout.py     # tests, synthetic fixtures only
+```

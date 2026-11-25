@@ -343,6 +343,29 @@ def test_heldout_guard(env):
     no_case_content(p.stdout + p.stderr)
 
 
+# -- leak check on the new text --------------------------------------------------------------------------
+
+def test_readme_and_code_hold_no_hidden_content():
+    sys.path.insert(0, str(HERE.parent))
+    import test_cases as tc  # the dev cases' leak helpers: hidden ids, hidden question texts, hidden-only values
+    strings, numbers = tc.hidden_only_values()
+    assert len(strings) > 50 and numbers
+    files = [HERE.parent / "README.md", HERE / "build_heldout.py", HERE / "test_heldout.py",
+             HERE.parent / "run_reviewer_eval.py"]
+    readme = (HERE.parent / "README.md").read_text()
+    assert "## Held-out test" in readme
+    for path in files:
+        text = path.read_text()
+        ids = set(re.findall(r"\bq\d{3}\b", text)) & set(tc.HIDDEN)
+        assert not ids, f"{path.name}: hidden question ids {sorted(ids)}"
+        flat = " ".join(text.split())
+        for qid, e in tc.HIDDEN.items():
+            assert " ".join(e["question"].split())[:60] not in flat, f"{path.name}: hidden question text of {qid}"
+        hits = tc.leaked(text, strings, numbers)
+        assert not hits, f"{path.name}: {len(hits)} hidden-only expected value(s)"  # count only
+    assert not set(FAKE_IDS) & set(tc.HIDDEN), "the synthetic ids must not be real hidden ids"
+
+
 # ---------------------------------------------------------------------------------------------------------
 
 def main():
