@@ -8,15 +8,17 @@ Flow:
 2. Give the reviewer (agent/reviewer.py) only {question, answer_schema, response, trace}, where the trace holds just
    the analyst's queries and their results (the reviewer numbers them; no ids or labels reach it).
 3. approve -> ship the analyst's answer (status approved). revise or reject -> retry, up to PIPELINE_MAX_RETRIES
-   times (default 1): rerun the analyst on the same question with a feedback block (the reviewer's findings and how
-   to treat them) appended to its user message (ANALYST_FEEDBACK_FILE), then review the new answer.
+   times (default 1): rerun the analyst on the same question with a feedback block appended to its user message
+   (ANALYST_FEEDBACK_FILE): the previous attempt's queries (numbered as the findings cite them, no results), its
+   final response, the findings and how to treat them. Then review the new answer.
    Approved on a retry -> status approved_after_retry. Otherwise -> needs_human_review.
 4. Fail closed: a reviewer format error or failure, or a failed retry, ends in needs_human_review.
 
 stdout: the approved analyst response, verbatim (an approved cannot_answer passes through unchanged); or, when the
 answer is withheld, one JSON object {"status": "needs_human_review", "withheld": true, "stakeholder_message": ...}.
-The stakeholder message comes from a fixed template with no model call and never contains a number or any text of
-the withheld answer. The handoff (withheld answer, queries and results, findings with evidence) goes only to the side
+The stakeholder message comes from a fixed template with no model call: it says how many analyses were run (in
+words), whether the automated review could not confirm the answer or could not be completed (reviewer failure), and
+a generic reason from the most severe finding. It never contains a number or any text of the withheld answer. The handoff (withheld answer, queries and results, findings with evidence) goes only to the side
 file.
 
 Side file: PIPELINE_RESULT_FILE (default pipeline_results/<UTC stamp>_<pid>.json, gitignored) with the config, every
@@ -52,21 +54,33 @@ DEFAULT_RESULTS = ROOT / "pipeline_results"
 REVIEW_FIELDS = ("question", "answer_schema", "response", "trace")
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
-FEEDBACK_TEMPLATE = """Reviewer feedback on your previous answer to this question. A reviewer checked that answer against \
-its queries and the metric definitions and raised the findings below. Query numbers refer to the queries of your \
-previous attempt, which you cannot see.
+FEEDBACK_TEMPLATE = """Reviewer feedback on your previous attempt at this question. A reviewer checked that attempt \
+against its queries and the metric definitions. The findings below refer to that attempt: its queries are numbered \
+the way the findings cite them (query 1, query 2, ...). The results are not shown; run your own queries.
 
+Your previous attempt's queries:
+{queries}
+
+Your previous attempt's final response:
+<<<
+{response}
+>>>
+
+Findings:
 {findings}
 
 How to use this feedback:
-- Verify every finding with your own queries before changing anything.
-- Do not use any number you did not compute yourself in this conversation.
+- Verify each finding with your own queries before changing anything.
+- Do not copy any number from the previous attempt or from the findings: use only numbers you compute yourself in this
+  conversation.
 - If a finding is wrong, say so and keep your answer.
 Then answer the question again in the required format."""
 
-STAKEHOLDER_TEMPLATE = ("We could not produce a verified answer to this question. The analysis was run twice and "
-                        "the automated review could not confirm it{reason}, so no figure is being shared. A human "
-                        "analyst will follow up with the full working.")
+STAKEHOLDER_TEMPLATE = ("We could not produce a verified answer to this question. {runs} and the automated review "
+                        "{outcome}{reason}, so no figure is being shared. A human analyst will follow up with the full "
+                        "working.")
+RUNS_TEXT = {1: "One analysis was run", 2: "Two analyses were run", 3: "Three analyses were run",
+             4: "Four analyses were run", 5: "Five analyses were run"}
 REASONS = {
     "definitions": "the definition or population could not be confirmed against the metric documentation",
     "grain_population": "the definition or population could not be confirmed against the metric documentation",
@@ -74,7 +88,8 @@ REASONS = {
     "claims_beyond_data": "some statements could not be supported by the data",
     "assumptions": "some statements could not be supported by the data",
     "format": "some statements could not be supported by the data",
-    "refusals_false_premises": "some statements could not be supported by the data",
+    "refusals_false_premises": "whether the question can be answered from the data, as it was asked, could not be "
+                               "confirmed",
 }
 
 
@@ -125,20 +140,31 @@ def queries_of(events):
             for e in events if e.get("event") == "sql"]
 
 
-def feedback_text(findings):
+def feedback_text(findings, response, events):
+    """The retry's feedback block: the previous attempt's queries (numbered as the reviewer numbers them, results
+    left out), its final response, the findings and how to treat them."""
+    sqls = [e.get("sql", "") for e in events if e.get("event") == "sql"]
+    queries = "\n\n".join(f"Query {n}:\n```sql\n{sql.strip()}\n```" for n, sql in enumerate(sqls, 1))
     lines = []
     for n, f in enumerate(findings, 1):
         lines.append(f"Finding {n}\n- check: {f.get('check')}\n- severity: {f.get('severity')}\n"
                      f"- evidence: {f.get('evidence')}\n- fix: {f.get('fix')}")
-    return FEEDBACK_TEMPLATE.format(findings="\n\n".join(lines) or "(no findings were given)")
+    return FEEDBACK_TEMPLATE.format(queries=queries or "(no queries)", response=(response or "").strip(),
+                                    findings="\n\n".join(lines) or "(no findings were given)")
 
 
-def stakeholder_message(findings):
-    """Fixed template; the reason comes from the most severe finding's check. No numbers, no answer text."""
+def stakeholder_message(findings, analyses, review_failed=False):
+    """Fixed template; no numbers and no answer text. analyses is the number of analyst runs (written in words);
+    review_failed means the last review returned a format error or failed. Otherwise the reason comes from the most
+    severe finding's check."""
+    runs = RUNS_TEXT.get(analyses, "Several analyses were run")
+    if review_failed:
+        return STAKEHOLDER_TEMPLATE.format(runs=runs, outcome="could not be completed", reason="")
     ranked = sorted((f for f in findings or [] if isinstance(f, dict)),
                     key=lambda f: SEVERITY_ORDER.get(f.get("severity"), 3))
     reason = REASONS.get(ranked[0].get("check")) if ranked else None
-    return STAKEHOLDER_TEMPLATE.format(reason=f": {reason}" if reason else "")
+    return STAKEHOLDER_TEMPLATE.format(runs=runs, outcome="could not confirm the answer",
+                                       reason=f": {reason}" if reason else "")
 
 
 class Pipeline:
@@ -235,7 +261,7 @@ def main(stdin=None, stdout=None, stderr=None, env=None):
         return 2
 
     p = Pipeline(env, stdout, stderr)
-    attempts, status, shipped, last_findings, last = [], None, None, [], None
+    attempts, status, shipped, last_findings, last, review_failed = [], None, None, [], None, False
     with tempfile.TemporaryDirectory(prefix="pipeline_") as tmp:
         feedback = None
         for attempt in range(1, max_retries + 2):
@@ -257,15 +283,16 @@ def main(stdin=None, stdout=None, stderr=None, env=None):
                 status, shipped = ("approved" if attempt == 1 else "approved_after_retry"), run["response"]
                 break
             if review["verdict"] is None:  # reviewer format error or failure: nothing to retry on
-                status = "needs_human_review"
+                status, review_failed = "needs_human_review", True
                 break
             last_findings = review["findings"]
             if attempt == max_retries + 1:
                 status = "needs_human_review"
                 break
-            feedback = feedback_text(last_findings)
+            feedback = feedback_text(last_findings, run["response"], run["events"])
 
-    message = stakeholder_message(last_findings) if status == "needs_human_review" else None
+    message = stakeholder_message(last_findings, len(attempts), review_failed) \
+        if status == "needs_human_review" else None
     handoff = None
     if status == "needs_human_review" and last is not None:
         handoff = {"answer": last["response"], "queries": queries_of(last["events"]), "findings": last_findings}

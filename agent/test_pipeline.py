@@ -150,10 +150,12 @@ def test_revise_retry_approve(env):
     assert calls[0]["feedback"] is None and calls[1]["payload"] == PAYLOAD
     fb = calls[1]["feedback"]
     for part in ("check: numbers", "severity: high", 'evidence: query 1 and "625"', "fix: Recompute the count.",
-                 "Verify every finding with your own queries before changing anything",
-                 "Do not use any number you did not compute yourself",
-                 "If a finding is wrong, say so and keep your answer"):
+                 "The findings below refer to that attempt", "Verify each finding with your own queries",
+                 "Do not copy any number", "If a finding is wrong, say so and keep your answer",
+                 "Query 1:\n```sql\nSELECT 1 AS n\n```", ANSWER_1.strip()):
         assert part in fb, part
+    assert "(1 row)" not in fb and "n\n1\n" not in fb, "query results are not part of the feedback"
+    assert "toolu_" not in fb and "thinking aloud" not in fb, "only the SQL and the final response"
     u = usage_of(err)
     assert (u["analyst_input_tokens"], u["reviewer_input_tokens"], u["input_tokens"]) == (2000, 600, 2600)
     assert (u["analyst_output_tokens"], u["reviewer_output_tokens"], u["tool_calls"]) == (200, 60, 2)
@@ -173,6 +175,8 @@ def test_revise_twice_is_withheld(env):
     assert h["answer"] == ANSWER_2 and h["findings"][0]["evidence"] == '"1,234"'
     assert h["queries"] == [{"sql": "SELECT 2 AS n", "result": "n\n2\n(1 row)"}]
     assert side["stakeholder_message"] == marker["stakeholder_message"]
+    assert "Two analyses were run" in marker["stakeholder_message"]
+    assert "could not confirm the answer" in marker["stakeholder_message"]
 
 
 @with_plan({"analyst": [ANSWER_1, ANSWER_2],
@@ -190,6 +194,8 @@ def test_reviewer_format_error_fails_closed(env):
     assert code == 0 and json.loads(out)["status"] == "needs_human_review"
     assert len(side["attempts"]) == 1 and side["attempts"][0]["review"] == {"verdict": None, "error": "format_error"}
     assert len(env.log("analyst.log")) == 1, "no retry without findings"
+    message = json.loads(out)["stakeholder_message"]
+    assert "One analysis was run" in message and "could not be completed" in message and "confirm" not in message
     assert side["handoff"]["answer"] == ANSWER_1 and side["handoff"]["findings"] == []
 
 
@@ -198,6 +204,7 @@ def test_reviewer_failure_fails_closed(env):
     code, out, err, side = env.run()
     assert code == 0 and json.loads(out)["status"] == "needs_human_review"
     assert side["attempts"][0]["review"]["error"] == "agent_failure" and len(env.log("analyst.log")) == 1
+    assert "could not be completed" in json.loads(out)["stakeholder_message"]
 
 
 @with_plan({"analyst": [ANSWER_1, ANSWER_2], "analyst_exit": [0, 1], "reviews": [review("revise", FINDING)]})
@@ -218,6 +225,7 @@ def test_first_analyst_failure_exits_1(env):
 def test_zero_retries_and_bad_config(env):
     code, out, err, side = env.run(PIPELINE_MAX_RETRIES="0")
     assert code == 0 and json.loads(out)["withheld"] is True and len(side["attempts"]) == 1
+    assert "One analysis was run" in json.loads(out)["stakeholder_message"]
     assert side["config"]["pipeline_max_retries"] == 0
     for bad in ("-1", "two"):
         code, _, err, _ = env.run(PIPELINE_MAX_RETRIES=bad)
@@ -271,32 +279,38 @@ def test_side_file_schema(env):
 
 
 def test_stakeholder_message():
-    def msg(*findings):
-        return pipeline.stakeholder_message(list(findings))
-    base = msg()
-    for text in (base, msg(FINDING), msg({**FINDING, "check": "definitions"})):
+    def msg(*findings, analyses=2, failed=False):
+        return pipeline.stakeholder_message(list(findings), analyses, failed)
+    for text in (msg(), msg(FINDING), msg(analyses=1, failed=True), msg({**FINDING, "check": "definitions"})):
         assert not re.search(r"\d", text), "no digits at all"
-        for part in ("could not produce a verified answer", "run twice", "could not confirm it",
-                     "no figure is being shared", "human analyst will follow up with the full working"):
+        for part in ("could not produce a verified answer", "no figure is being shared",
+                     "human analyst will follow up with the full working"):
             assert part in text, part
+    assert msg(analyses=1).count("One analysis was run") == 1 and "Two analyses were run" in msg(analyses=2)
+    assert "Several analyses were run" in msg(analyses=9)
+    assert "could not confirm the answer" in msg(FINDING) and "could not be completed" not in msg(FINDING)
+    failed = msg(FINDING, analyses=1, failed=True)
+    assert "could not be completed" in failed and "confirm" not in failed and ":" not in failed  # no reason clause
     assert "definition or population could not be confirmed against the metric documentation" in \
-        msg({"check": "definitions", "severity": "high"}) == msg({"check": "grain_population", "severity": "medium"})
+        msg({"check": "definitions", "severity": "high"})
+    assert msg({"check": "definitions", "severity": "high"}) == msg({"check": "grain_population", "severity": "medium"})
     assert "figures could not be traced to the queries" in msg({"check": "numbers", "severity": "low"})
-    for check in ("claims_beyond_data", "assumptions", "format", "refusals_false_premises"):
+    for check in ("claims_beyond_data", "assumptions", "format"):
         assert "some statements could not be supported by the data" in msg({"check": check, "severity": "medium"})
-    # the most severe finding decides, whatever its position
+    assert "whether the question can be answered from the data, as it was asked, could not be confirmed" in \
+        msg({"check": "refusals_false_premises", "severity": "high"})
     mixed = msg({"check": "format", "severity": "low"}, {"check": "numbers", "severity": "high"})
-    assert "figures could not be traced" in mixed
-    assert ":" not in base  # no reason clause without findings
+    assert "figures could not be traced" in mixed  # the most severe finding decides, whatever its position
+    assert ":" not in msg()  # no reason clause without findings
     # nothing copied from the withheld answer or the findings: no number, no run of three words
     withheld = ANSWER_2 + " " + json.dumps(FINDING)
     words = re.findall(r"[A-Za-z0-9_.,%]+", withheld)
-    for text in (msg(FINDING), msg({**FINDING, "check": "definitions"})):
+    for text in (msg(FINDING), msg({**FINDING, "check": "definitions"}), msg(FINDING, analyses=1, failed=True)):
         for number in re.findall(r"\d[\d,.]*", withheld):
             assert number not in text, number
         lowered = " ".join(re.findall(r"[a-z0-9_.,%]+", text.lower()))
-        for i in range(len(words) - 2):
-            run = " ".join(words[i:i + 3]).lower()
+        for k in range(len(words) - 2):
+            run = " ".join(words[k:k + 3]).lower()
             assert run not in lowered, run
 
 
