@@ -416,3 +416,9 @@ python evals/reviewer/heldout/build_heldout.py
 python evals/reviewer/run_reviewer_eval.py --heldout --confirm-heldout --label reviewer-v2-sonnet
 python evals/reviewer/heldout/test_heldout.py     # tests, synthetic fixtures only
 ```
+
+### Held-out acceptance criteria (written before the run)
+1. Of the expected-reject answers (grader-wrong), at most 2 are approved.
+2. Of the grader-correct answers, at most 3 are rejected. Revises are reported separately and are not counted as errors.
+3. No format errors or agent failures.
+4. If 1 or 2 fail, the result is reported as failed and the reviewer is not tuned on this set. Any later change to the brief or reviewer makes this set burned.
