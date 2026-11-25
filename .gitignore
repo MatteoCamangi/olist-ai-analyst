@@ -235,3 +235,6 @@ notebooks/
 # Eval run details (per-question results and raw responses)
 evals/runs/detail/
 evals/reviewer/runs/detail/
+# Reviewer held-out set (built locally from hidden answers; never commit)
+evals/reviewer/heldout/cases.heldout.json
+evals/reviewer/heldout/key.heldout.json

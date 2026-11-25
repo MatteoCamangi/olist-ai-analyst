@@ -5,6 +5,7 @@ Usage (from the repo root):
     python evals/reviewer/run_reviewer_eval.py --label quick --only q013.ok,q013.wrong_filter
     python evals/reviewer/run_reviewer_eval.py --label x --agent-cmd "python agent/reviewer.py" --timeout 300
     python evals/reviewer/run_reviewer_eval.py --rescore evals/reviewer/runs/detail/<run>.json
+    python evals/reviewer/run_reviewer_eval.py --heldout --confirm-heldout --label <label>
 
 Each case runs in a fresh process. The agent gets only {question, answer_schema, response, trace} on stdin; the
 answer key (expected verdict and checks, fault type, origin, edits, ids) stays here. The agent prints its verdict
@@ -17,10 +18,14 @@ Guard: if every case fails before reaching the model (agent failure and zero tok
 --rescore DETAIL re-scores the reviewer outputs saved in a detail file with the current scorer and the current labels
 (no agent call) and writes a new summary and detail labelled <label>-rescored; the originals are never touched.
 Metrics are reported under the corrected labels (headline) and under the original labels of corrected cases.
+--heldout scores the reviewer on the held-out cases built by heldout/build_heldout.py: it needs --confirm-heldout and a
+clean git tree, prints and commits aggregates only (<timestamp>_<label>_heldout.json), and keeps per-case outputs in
+the gitignored detail file. There is no option to show held-out cases.
 The metrics, the evidence rule and the number rules (scorer version SCORER_VERSION) are in evals/reviewer/README.md.
 """
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -39,6 +44,11 @@ import run_eval  # noqa: E402  (git_info)
 import reviewer  # noqa: E402  (input fields, query numbering, check names)
 
 CASES = HERE / "cases.json"
+HELDOUT_DIR = HERE / "heldout"
+HELDOUT_CASES = HELDOUT_DIR / "cases.heldout.json"
+HELDOUT_KEY = HELDOUT_DIR / "key.heldout.json"
+HELDOUT_FIELDS = ("id", "question", "answer_schema", "response", "trace")
+FINGERPRINTED = {"brief_sha256": ROOT / "agent" / "REVIEWER_BRIEF.md", "reviewer_sha256": ROOT / "agent" / "reviewer.py"}
 RUNS = HERE / "runs"
 DEFAULT_CMD = "python agent/reviewer.py"
 PAYLOAD_FIELDS = reviewer.INPUT_FIELDS  # the only case fields the agent ever sees
@@ -416,6 +426,8 @@ def print_table(summary):
 def rescore(detail_path, cases_path, runs_dir):
     """Re-score the outputs saved in a detail file with the current scorer and labels. No agent call."""
     detail = json.loads(Path(detail_path).read_text())
+    if detail.get("heldout"):
+        raise SystemExit("run_reviewer_eval: a held-out detail file cannot be rescored")
     if not isinstance(detail.get("cases"), list) or "label" not in detail:
         raise SystemExit(f"run_reviewer_eval: {detail_path} is not a detail file")
     current = {c["id"]: c for c in json.loads(Path(cases_path).read_text())}
@@ -433,6 +445,143 @@ def rescore(detail_path, cases_path, runs_dir):
     return write_run(items, Path(runs_dir), f"{detail['label']}-rescored", meta)
 
 
+# -- held-out --------------------------------------------------------------------------------------------
+
+def git_state(repo):
+    """(sha, dirty) of a repo; dirty counts untracked files. (None, None) without git."""
+    try:
+        sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True,
+                             check=True).stdout.strip()
+        dirty = bool(subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True,
+                                    check=True).stdout.strip())
+        return sha, dirty
+    except (OSError, subprocess.CalledProcessError):
+        return None, None
+
+
+def sha256_of(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def heldout_block(entries, group):
+    """Counts and rates for one group of held-out cases (entries: (key, got) pairs)."""
+    verdicts = ("rejected", "revised", "approved")
+    names = dict(zip(("reject", "revise", "approve"), verdicts))
+    block = {"n": len(entries), **dict.fromkeys(verdicts, 0), "format_error": 0, "agent_failure": 0}
+    for _, got in entries:
+        block[names.get(got, got)] += 1
+    block["rates"] = {k: (round(block[k] / block["n"], 4) if block["n"] else None)
+                      for k in (*verdicts, "format_error", "agent_failure")}
+    if group == "expected_reject":
+        block["distinct_questions"] = len({k["question_id"] for k, _ in entries})
+        block["approved_distinct_questions"] = len({k["question_id"] for k, got in entries if got == "approve"})
+    return block
+
+
+def heldout_summary_tables(items):
+    def groups(subset):
+        out = {}
+        for group in ("expected_reject", "unlabelled_correct"):
+            out[group] = heldout_block([(i["key"], i["got"]) for i in subset if i["key"]["group"] == group], group)
+        return out
+    labels = sorted({i["key"]["source_label"] for i in items})
+    overall = {m: rate([i["scores"][m] for i in items])
+               for m in ("format_error", "agent_failure", "evidence_valid", "invented_numbers", "derived_numbers")}
+    return {**groups(items), "per_source_label": {lab: groups([i for i in items if i["key"]["source_label"] == lab])
+                                                   for lab in labels}, "overall": overall}
+
+
+def score_heldout(case, status, output, docs):
+    valid = status == "valid"
+    findings = output["findings"] if valid else []
+    s = {"evidence_valid": None, "invented_numbers": None, "derived_numbers": None,
+         "format_error": status == "format_error", "agent_failure": status == "agent_failure"}
+    if valid and findings:
+        sources, n_queries = case_sources(case, docs)
+        s["evidence_valid"] = all(evidence_ok(f.get("evidence", ""), sources, n_queries) for f in findings)
+        invented, derived = classify_numbers(findings, case, docs)
+        s["invented_numbers"], s["derived_numbers"] = bool(invented), bool(derived)
+    return s
+
+
+def print_heldout(summary):
+    """Counts and rates only: no ids, questions or reviewer text."""
+    def line(name, b, order):
+        cells = "  ".join(f"{k} {b[k]}" for k in order)
+        return f"{name:<34} n {b['n']:<4} {cells}  format_error {b['format_error']}  agent_failure {b['agent_failure']}"
+    print(line("expected reject", summary["expected_reject"], ("rejected", "revised", "approved")))
+    er = summary["expected_reject"]
+    print(f"{'':<34} approved = dangerous miss; distinct questions {er['distinct_questions']}, "
+          f"among approved {er['approved_distinct_questions']}")
+    print(line("unlabelled (grader-correct)", summary["unlabelled_correct"], ("approved", "revised", "rejected")))
+    print(f"{'':<34} rejected = clear false alarm; revised = ambiguous, not an error")
+    for label, groups in summary["per_source_label"].items():
+        print(line(f"  {label}: expected reject", groups["expected_reject"], ("rejected", "revised", "approved")))
+        print(line(f"  {label}: unlabelled", groups["unlabelled_correct"], ("approved", "revised", "rejected")))
+    print("overall: " + "  ".join(f"{m} {fmt(r)}" for m, r in summary["overall"].items()))
+    t = summary["tokens"]
+    print(f"tokens: input {t['input_tokens']}  output {t['output_tokens']}  model {summary['model']}  "
+          f"scorer v{summary['scorer_version']}  earlier held-out runs: {summary['earlier_heldout_runs']}")
+
+
+def run_heldout(args, p):
+    if not args.confirm_heldout:
+        print("Refusing --heldout without --confirm-heldout. The held-out set is one shot: run it once, with the "
+              "final brief, and change nothing because of the result.", file=sys.stderr)
+        return 2
+    if not args.label:
+        p.error("--label is required")
+    if args.only or args.rescore:
+        p.error("--only and --rescore cannot be used with --heldout")
+    sha, dirty = git_state(args.repo)
+    if sha is None or dirty:
+        print("Refusing --heldout: the git working tree is dirty (or git is unavailable). Commit or stash first, so "
+              "the run is tied to one commit.", file=sys.stderr)
+        return 2
+    cases = json.loads(Path(args.heldout_cases).read_text())
+    key = json.loads(Path(args.heldout_key).read_text())
+    if [set(c) for c in cases if set(c) != set(HELDOUT_FIELDS)] or {c["id"] for c in cases} != set(key):
+        raise SystemExit("run_reviewer_eval: held-out cases and key do not match; rebuild them")
+    docs = load_docs()
+    items = []
+    for case in cases:
+        start = time.monotonic()
+        out, err, failure = call_agent(args.agent_cmd, case, args.timeout)  # payload(): the 4 reviewer fields only
+        status, output = ("agent_failure", None) if failure else classify(out)
+        items.append({"id": case["id"], "key": key[case["id"]], "status": status, "output": output,
+                      "failure": failure or (None if status != "agent_failure" else "agent failed: no JSON object"),
+                      "got": output["verdict"] if status == "valid" else status, "usage": parse_usage(err),
+                      "stderr_tail": (err or "")[-2000:], "seconds": round(time.monotonic() - start, 2),
+                      "scores": score_heldout(case, status, output, docs)})
+    tokens = {k: sum((i["usage"] or {}).get(k, 0) for i in items) for k in ("input_tokens", "output_tokens")}
+    if items and all(i["status"] == "agent_failure" for i in items) and sum(tokens.values()) == 0:
+        print("WARNING: every case failed before reaching the model; summary not saved", file=sys.stderr)
+        print(f"failures: {'; '.join(sorted({i['failure'] for i in items}))}", file=sys.stderr)
+        return 3
+    runs_dir = Path(args.runs_dir)
+    earlier = len(list(runs_dir.glob("*_heldout.json")))
+    stamp, name = run_name(runs_dir, f"{args.label}_heldout")
+    first = items[0]["usage"] if items else None
+    summary = {"heldout": True, "timestamp": stamp, "label": args.label, "git_sha": sha, "git_dirty": dirty,
+               "scorer_version": SCORER_VERSION, "model": first["model"] if first else None,
+               **{k: sha256_of(path) for k, path in FINGERPRINTED.items()},
+               "agent_cmd": args.agent_cmd, "earlier_heldout_runs": earlier, "n_cases": len(items),
+               **heldout_summary_tables(items), "tokens": tokens}
+    detail = {**summary, "cases": [{k: i[k] for k in ("id", "status", "failure", "got", "output", "scores", "usage",
+                                                      "seconds", "stderr_tail")}
+                                   | {"group": i["key"]["group"], "source_label": i["key"]["source_label"]}
+                                   for i in items]}
+    (runs_dir / "detail").mkdir(parents=True, exist_ok=True)
+    summary_path, detail_path = runs_dir / f"{name}.json", runs_dir / "detail" / f"{name}.json"
+    for path, data, ascii_only in ((summary_path, summary, True), (detail_path, detail, False)):
+        with open(path, "x") as f:
+            f.write(json.dumps(data, indent=2, ensure_ascii=ascii_only) + "\n")
+    print_heldout(summary)
+    print(f"summary: {summary_path}\ndetail:  {detail_path} (gitignored; per-case outputs, do not open while working "
+          "on the reviewer)")
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="Run and score the reviewer agent on the reviewer cases.")
     p.add_argument("--label")
@@ -441,9 +590,18 @@ def main(argv=None):
     p.add_argument("--agent-cmd", default=DEFAULT_CMD)
     p.add_argument("--timeout", type=float, default=300)
     p.add_argument("--rescore", type=Path, metavar="DETAIL", help="re-score a detail file; no agent calls")
+    p.add_argument("--heldout", action="store_true", help="score the held-out set (aggregates only)")
+    p.add_argument("--confirm-heldout", action="store_true", help="required with --heldout")
+    p.add_argument("--heldout-cases", type=Path, default=HELDOUT_CASES, help=argparse.SUPPRESS)
+    p.add_argument("--heldout-key", type=Path, default=HELDOUT_KEY, help=argparse.SUPPRESS)
+    p.add_argument("--repo", type=Path, default=ROOT, help=argparse.SUPPRESS)
     p.add_argument("--runs-dir", type=Path, default=RUNS, help=argparse.SUPPRESS)
     args = p.parse_args(argv)
 
+    if args.heldout:
+        return run_heldout(args, p)
+    if args.confirm_heldout:
+        p.error("--confirm-heldout only goes with --heldout")
     if args.rescore:
         summary, summary_path, detail_path = rescore(args.rescore, args.cases, args.runs_dir)
         print_table(summary)
