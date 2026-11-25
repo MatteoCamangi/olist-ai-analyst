@@ -34,7 +34,9 @@ agent/pipeline.py, it writes its side file there; the runner keeps it in the det
 block to the summary (aggregates only, every split): the analyst's first attempt graded alone (the paired within-run
 baseline), what was shipped (correct / wrong / other), what was withheld (blocked_correct / blocked_wrong, graded on
 the withheld answer), fixed_by_retry, broken_by_retry, statuses, attempts and tokens split by analyst and reviewer.
-A withheld answer prints a marker instead of an envelope, so the main rates count it as a format_error.
+A withheld answer (status needs_human_review, marker printed) gets its own outcome "withheld" instead of a
+format_error, and pipeline summaries add "withheld" and "withheld_rate" to every split's rates. Summaries of other
+agents keep exactly their old rate keys.
 """
 import argparse
 import datetime as dt
@@ -186,6 +188,9 @@ def run_one(args, entry):
         else:
             response, stderr, trace, side = call_agent(args.agent_cmd, entry, args.timeout)
         result = grader.grade(entry, response)
+        if side and side.get("status") == "needs_human_review":
+            result = {**result, "outcome": "withheld", "correct": False,
+                      "reasons": ["withheld by the pipeline (needs_human_review)"]}
     except AgentFailed as exc:
         failed = exc.args[0]
         result = failed_result(entry, exc.args[0])
@@ -285,6 +290,15 @@ def rates_only(summary):
     return {split: {k: v for k, v in s.items() if k in RATE_KEYS} for split, s in summary.items()}
 
 
+def add_withheld(rates, results):
+    """Pipeline runs only: the count and rate of withheld answers per split (same denominator as accuracy)."""
+    for split, r in rates.items():
+        rs = results if split == "all" else [x for x in results if x["split"] == split]
+        n = sum(x["outcome"] == "withheld" for x in rs)
+        r["withheld"], r["withheld_rate"] = n, round(n / len(rs), 4) if rs else None
+    return rates
+
+
 def earlier_hidden_runs(runs_dir):
     n = 0
     for p in Path(runs_dir).glob("*.json"):
@@ -306,9 +320,12 @@ def run_name(runs_dir, split, label):
 
 def print_rates(summary):
     for split, s in summary.items():
-        print(f"[{split}] questions {s['questions']}  correct {s['correct']}  accuracy {s['accuracy']}  "
-              f"wrong_confident {s['wrong_confident_rate']}  false_refusal {s['false_refusal_rate']}  "
-              f"incomplete_refusal {s['incomplete_refusal_rate']}  format_error {s['format_error_rate']}")
+        line = (f"[{split}] questions {s['questions']}  correct {s['correct']}  accuracy {s['accuracy']}  "
+                f"wrong_confident {s['wrong_confident_rate']}  false_refusal {s['false_refusal_rate']}  "
+                f"incomplete_refusal {s['incomplete_refusal_rate']}  format_error {s['format_error_rate']}")
+        if "withheld_rate" in s:
+            line += f"  withheld {s['withheld_rate']}"
+        print(line)
 
 
 def select(questions, args, parser):
@@ -375,6 +392,7 @@ def main(argv=None):
     pipe = pipeline_block(items)
     if pipe is not None:
         summary["pipeline"] = pipe
+        add_withheld(summary["rates"], results)
     if args.split != "dev":
         summary["earlier_hidden_runs"] = earlier_hidden_runs(runs_dir)
     detail = {**summary, "summary": full,

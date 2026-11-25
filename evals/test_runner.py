@@ -620,7 +620,14 @@ def test_pipeline_run_summary(env):
     assert pb["shipped_correct"]["n"] == n_dev - withheld and pb["blocked_correct"]["n"] == withheld
     assert pb["broken_by_retry"]["n"] == withheld and pb["fixed_by_retry"]["n"] == 0 and pb["shipped_wrong"]["n"] == 0
     assert pb["statuses"] == {"approved": n_dev - withheld, "needs_human_review": withheld}
-    assert summary["rates"]["dev"]["format_error_rate"] == round(withheld / n_dev, 4)  # a withheld marker
+    dev = summary["rates"]["dev"]
+    assert dev["format_error_rate"] == 0.0, "a withheld marker is not a format error"
+    assert dev["withheld"] == withheld and dev["withheld_rate"] == round(withheld / n_dev, 4)
+    assert dev["accuracy"] == round((n_dev - withheld) / n_dev, 4)
+    assert set(dev) == set(run_eval.RATE_KEYS) | {"withheld", "withheld_rate"}
+    outcomes = [q["result"]["outcome"] for q in detail["questions"]]
+    assert outcomes.count("withheld") == withheld and "format_error" not in outcomes
+    assert "withheld" in p.stdout
     assert summary["agent_config"]["reviewer_model"] == "claude-r" and summary["agent_config"]["pipeline_max_retries"] == 1
     assert pb["tokens"]["reviewer"] == {"input_tokens": 3 * n_dev, "output_tokens": n_dev}
     assert all(q["pipeline"]["status"] for q in detail["questions"]), "side files kept in the detail file"
@@ -631,11 +638,13 @@ def test_pipeline_run_summary(env):
     assert "pipeline" in summary and set(summary["pipeline"]["statuses"]) <= {"approved", "needs_human_review"}
     text = json.dumps(summary)
     assert not ID.search(text) and not ID.search(p.stdout), "ids in a hidden pipeline summary"
-    assert "shipped_response" not in text and "handoff" not in text and "withheld\"" not in text
+    assert "shipped_response" not in text and "handoff" not in text and "stakeholder_message" not in text
     assert_summary_no_leak(summary, "pipeline all summary")
+    assert all(set(r) == set(run_eval.RATE_KEYS) | {"withheld", "withheld_rate"} for r in summary["rates"].values())
     p = env.run("--split", "dev", "--label", "plain", "--questions", "q001", agent="perfect")  # non-pipeline: no block
     ok(p, "perfect")
-    assert "pipeline" not in env.latest(p)[0]
+    plain = env.latest(p)[0]
+    assert "pipeline" not in plain and all(set(r) == set(run_eval.RATE_KEYS) for r in plain["rates"].values())
 
 
 def test_hidden_values_list_is_not_empty():

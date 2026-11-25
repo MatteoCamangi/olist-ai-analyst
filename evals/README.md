@@ -194,8 +194,9 @@ answer on stdout), so `run_eval.py --agent-cmd "python agent/pipeline.py"` measu
    through as is.
 4. On **revise** or **reject** the analyst is rerun once (`PIPELINE_MAX_RETRIES`, default 1) on the same question,
    with a feedback block appended to its user message (`ANALYST_FEEDBACK_FILE`; the system prompt never changes).
-   The block holds the findings (check, severity, evidence, fix) and three instructions: verify every finding with
-   your own queries before changing anything; do not use any number you did not compute yourself; if a finding is
+   The block holds the previous attempt's SQL queries (numbered the way the findings cite them, without results),
+   its final response, the findings (check, severity, evidence, fix), and instructions: the findings refer to that
+   attempt; verify each finding with your own queries; do not copy any number you did not compute; if a finding is
    wrong, say so and keep your answer. The new answer is reviewed again. Approved → `approved_after_retry`.
 5. Otherwise the answer is **withheld** (`needs_human_review`). The pipeline fails closed: a reviewer format error or
    failure, or a failed retry, also withholds the answer.
@@ -203,15 +204,19 @@ answer on stdout), so `run_eval.py --agent-cmd "python agent/pipeline.py"` measu
 **Withheld answers.**
 - stdout gets one JSON marker, `{"status": "needs_human_review", "withheld": true, "stakeholder_message": ...}`.
 - The message comes from a fixed template with no model call and no digits. It says that a verified answer could not
-  be produced, that the analysis was run twice and the automated review could not confirm it, that no figure is being
-  shared, and that a human analyst will follow up with the full working.
+  be produced; how many analyses were run, in words ("One analysis was run", "Two analyses were run"); that the
+  automated review could not confirm the answer, or, when the reviewer itself failed (format error or crash), that
+  it could not be completed; that no figure is being shared; and that a human analyst will follow up with the full
+  working.
 - It may add one generic reason from the most severe finding:
   - definitions or grain/population: "the definition or population could not be confirmed against the metric
     documentation";
   - numbers: "the figures could not be traced to the queries";
-  - claims, assumptions, format (and refusals): "some statements could not be supported by the data".
-- It never contains a number or any text of the withheld answer. The template says "run twice" even when the run
-  stopped after one attempt (a reviewer failure, or `PIPELINE_MAX_RETRIES=0`).
+  - claims, assumptions or format: "some statements could not be supported by the data";
+  - refusals and false premises: "whether the question can be answered from the data, as it was asked, could not be
+    confirmed".
+  When the reviewer failed, no reason is given.
+- It never contains a number or any text of the withheld answer.
 - The handoff package (the withheld answer, its queries and results, the findings with evidence) goes only to the side
   file: `PIPELINE_RESULT_FILE` (the runner sets a temp path per question and keeps it in the gitignored detail file).
   Standalone, the side file goes to `pipeline_results/` (gitignored).
@@ -234,8 +239,10 @@ How to read them:
   baseline run.
 - `blocked_correct` and `broken_by_retry` are the price. A withheld answer costs a human follow-up, not a wrong
   figure.
-- The main rates count a withheld marker as a format_error, because there is no envelope. Read the pipeline block,
-  not the main accuracy, for a pipeline run.
+- In the main rates a withheld answer has its own outcome, `withheld` (not format_error). Pipeline summaries add
+  `withheld` and `withheld_rate` to every split's rates, with the same denominator as accuracy, so accuracy plus
+  the other rates plus withheld_rate covers every question. Summaries of other agents, including every run committed
+  before this change, keep exactly their old rate keys.
 
 **Caveats.**
 - The reviewer can mislead the analyst: a wrong finding can push a correct answer to change (`broken_by_retry`).
