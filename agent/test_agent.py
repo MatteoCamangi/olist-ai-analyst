@@ -977,6 +977,39 @@ def test_raw_brief_consistent():
         assert marts_sentence in system and raw_line not in system and analyst.RAW_BRIEF_LINE not in system, key
 
 
+def test_no_feedback_request_is_byte_identical():
+    import hashlib
+    default_system = analyst.build_system_prompt()
+    assert hashlib.sha256(default_system.encode()).hexdigest() == \
+        "5b29b55d7d0e8be35d526baaade73e07c8b43264980a29b7388f2de39cd84e68"
+    with tempfile.TemporaryDirectory() as tmp:
+        empty = Path(tmp) / "empty.txt"
+        empty.write_text("  \n")
+        for env in ({analyst.KEY_ENV: SECRET}, {analyst.KEY_ENV: SECRET, analyst.FEEDBACK_ENV: ""},
+                    {analyst.KEY_ENV: SECRET, analyst.FEEDBACK_ENV: str(empty)}):
+            client = answer_once()
+            code, _, err = run_main(client, env=env)
+            assert code == 0, err
+            assert client.calls[0]["system"] == default_system
+            assert client.calls[0]["first"] == {"role": "user", "content": analyst.build_user_message(PAYLOAD)}
+
+
+def test_feedback_reaches_user_message_only():
+    feedback = "Reviewer feedback on your previous answer:\n- check: numbers ... verify with your own queries."
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "feedback.txt"
+        path.write_text(feedback + "\n")
+        client = answer_once()
+        code, _, err = run_main(client, env={analyst.KEY_ENV: SECRET, analyst.FEEDBACK_ENV: str(path)})
+    assert code == 0, err
+    call = client.calls[0]
+    assert call["system"] == analyst.build_system_prompt() and feedback not in call["system"]
+    assert call["first"]["content"] == analyst.build_user_message(PAYLOAD) + "\n\n" + feedback
+    client = FakeClient(None)
+    code, _, err = run_main(client, env={analyst.KEY_ENV: SECRET, analyst.FEEDBACK_ENV: "/nonexistent/feedback.txt"})
+    assert code == 2 and "feedback file" in err and not client.calls
+
+
 def test_user_message_holds_question_and_schema_only():
     calls = FakeClient(lambda i, kw: SimpleNamespace(stop_reason="end_turn", usage=usage(),
                                                      content=[text_block(ANSWER)]))

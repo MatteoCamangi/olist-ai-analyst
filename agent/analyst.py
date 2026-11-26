@@ -35,6 +35,10 @@ same max_tokens as the visible answer.
 The model sees only the system prompt built from ALLOWED_DOCS, the question with its answer_schema, and the results
 of its own run_sql calls (agent/sandbox.py).
 
+Feedback: if ANALYST_FEEDBACK_FILE is set to a non-empty file, its text is appended to the user message (after the
+question and answer_schema). The system prompt is never changed; without it the request is exactly as before. An
+unreadable feedback file exits 2. The pipeline (agent/pipeline.py) uses it for its retry.
+
 Trace: if AGENT_TRACE_FILE is set, one JSON line per event is appended to that file (flushed per line):
     {"event": "text", "turn": n, "text"}                   each non-empty text block the model returns
     {"event": "sql", "turn": n, "tool_use_id", "sql"}      each run_sql call, over-budget ones included
@@ -68,6 +72,7 @@ BACKOFF_SECONDS = 2.0
 API_TIMEOUT_SECONDS = 240
 KEY_ENV = "OLIST_AGENT_API_KEY"
 TRACE_ENV = "AGENT_TRACE_FILE"
+FEEDBACK_ENV = "ANALYST_FEEDBACK_FILE"  # optional text appended to the user message only (the pipeline's retry)
 MODEL_ENV, DOCS_ENV, BRIEF_ENV, SCOPE_ENV = "ANALYST_MODEL", "ANALYST_DOCS", "ANALYST_BRIEF", "ANALYST_SCOPE"
 DOCS_MODES = ("full", "schema", "none")
 BRIEF_MODES = ("full", "minimal")
@@ -315,11 +320,15 @@ def _add_usage(usage, u):
 
 
 def run(payload, client, sandbox, usage, sleep=time.sleep, system=None, trace=None, model=MODEL,
-        tool=sandbox_mod.TOOL):
-    """Return the final response text. Updates usage in place, so it is complete even when this raises."""
+        tool=sandbox_mod.TOOL, feedback=None):
+    """Return the final response text. Updates usage in place, so it is complete even when this raises.
+    feedback, when given, is appended to the user message; the system prompt never changes."""
     trace = trace or NoTrace()
     system = system if system is not None else build_system_prompt()
-    messages = [{"role": "user", "content": build_user_message(payload)}]
+    content = build_user_message(payload)
+    if feedback:
+        content += "\n\n" + feedback.strip()
+    messages = [{"role": "user", "content": content}]
     tool_choice = {"type": "auto"}
     for turn in range(1, MAX_TURNS + 1):
         response = call_with_retry(
@@ -402,6 +411,13 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
         if not api_key:
             print(f"analyst: {KEY_ENV} is not set", file=stderr)
             return 2
+        feedback = None
+        if env.get(FEEDBACK_ENV):
+            try:
+                feedback = Path(env[FEEDBACK_ENV]).read_text().strip() or None
+            except OSError as exc:
+                print(f"analyst: cannot read feedback file ({type(exc).__name__})", file=stderr)
+                return 2
         if env.get(TRACE_ENV):
             try:
                 trace = Trace(env[TRACE_ENV])
@@ -413,7 +429,7 @@ def main(stdin=None, stdout=None, stderr=None, env=None, client_factory=None, sa
             sandbox = (sandbox_factory or sandbox_mod.Sandbox)(scope=config["scope"])
             system = build_system_prompt(config["docs"], config["brief"], config["scope"])
             text = run(payload, client, sandbox, usage, sleep=sleep, system=system, trace=trace,
-                       model=config["model"], tool=sandbox_mod.tool_for(config["scope"]))
+                       model=config["model"], tool=sandbox_mod.tool_for(config["scope"]), feedback=feedback)
         except AgentError as exc:
             print(f"analyst: {exc}", file=stderr)
             trace.event("error", message=str(exc))

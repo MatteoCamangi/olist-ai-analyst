@@ -180,3 +180,99 @@ sentences. The q017 and q021 must_not rules also read clauses (split at ", so", 
 in one clause does not hide a figure in the next.
 Before trusting a behavior result, read the rule `evidence` and the `manual_review` snippets in the detail file
 (for hidden runs, only after the agent work it would inform is finished).
+
+## Analyst–reviewer pipeline
+
+`agent/pipeline.py` wraps the analyst and the reviewer behind the analyst's own interface (question JSON on stdin,
+answer on stdout), so `run_eval.py --agent-cmd "python agent/pipeline.py"` measures it like any agent.
+
+**Design.**
+1. The analyst answers.
+2. The reviewer gets only question, answer_schema, response and the analyst's queries with their results. No ids, no
+   labels and no eval data reach it.
+3. On **approve** the analyst's answer is shipped unchanged (status `approved`); an approved cannot_answer passes
+   through as is.
+4. On **revise** or **reject** the analyst is rerun once (`PIPELINE_MAX_RETRIES`, default 1) on the same question,
+   with a feedback block appended to its user message (`ANALYST_FEEDBACK_FILE`; the system prompt never changes).
+   The block holds the previous attempt's SQL queries (numbered the way the findings cite them, without results),
+   its final response, the findings (check, severity, evidence, fix), and instructions: the findings refer to that
+   attempt; verify each finding with your own queries; do not copy any number you did not compute; and the new answer
+   must stand on its own for the person who asked: no mention of the review, a reviewer, an earlier attempt, a
+   previous answer or any earlier figure, no number that the attempt's own queries did not produce, and any
+   disagreement with a finding explained only in terms of the data and the metric definition. The new answer is
+   reviewed again. Approved → `approved_after_retry`.
+5. Otherwise the answer is **withheld** (`needs_human_review`). The pipeline fails closed: a reviewer format error or
+   failure, or a failed retry, also withholds the answer.
+
+**Withheld answers.**
+- stdout gets one JSON marker, `{"status": "needs_human_review", "withheld": true, "stakeholder_message": ...}`.
+- The message comes from a fixed template with no model call and no digits. It says that a verified answer could not
+  be produced; how many analyses were run, in words ("One analysis was run", "Two analyses were run"); that the
+  automated review could not confirm the answer, or, when the reviewer itself failed (format error or crash), that
+  it could not be completed; that no figure is being shared; and that a human analyst will follow up with the full
+  working.
+- It may add one generic reason from the most severe finding:
+  - definitions or grain/population: "the definition or population could not be confirmed against the metric
+    documentation";
+  - numbers: "the figures could not be traced to the queries";
+  - claims, assumptions or format: "some statements could not be supported by the data";
+  - refusals and false premises: "whether the question can be answered from the data, as it was asked, could not be
+    confirmed".
+  When the reviewer failed, no reason is given.
+- It never contains a number or any text of the withheld answer.
+- The handoff package (the withheld answer, its queries and results, the findings with evidence) goes only to the side
+  file: `PIPELINE_RESULT_FILE` (the runner sets a temp path per question and keeps it in the gitignored detail file).
+  Standalone, the side file goes to `pipeline_results/` (gitignored).
+
+**Metrics** (summary `pipeline` block, counts with denominators, aggregates only on every split):
+
+| Metric | Meaning |
+|---|---|
+| `first_attempt_correct` | the analyst's first answer graded alone: the **paired within-run baseline** |
+| `shipped_correct` / `shipped_wrong` / `shipped_other` | shipped answers graded: correct, confidently wrong (reached the stakeholder), other (refusal, format) |
+| `blocked_correct` | withheld although the withheld answer was correct (false block) |
+| `blocked_wrong` | withheld and the withheld answer was not correct (caught) |
+| `fixed_by_retry` | first answer not correct, shipped answer correct |
+| `broken_by_retry` | first answer correct, not shipped correct (withheld or changed for the worse) |
+| `statuses`, `attempts`, `tokens` | status counts, attempts distribution, tokens split analyst vs reviewer |
+
+How to read them:
+- Compare `shipped_wrong` with the number of wrong first attempts in the **same run**. The first attempt is the analyst
+  alone on the same draws, so the difference is what the loop changed, without run-to-run noise from a separate
+  baseline run.
+- `blocked_correct` and `broken_by_retry` are the price. A withheld answer costs a human follow-up, not a wrong
+  figure.
+- In the main rates a withheld answer has its own outcome, `withheld` (not format_error). Pipeline summaries add
+  `withheld` and `withheld_rate` to every split's rates, with the same denominator as accuracy, so accuracy plus
+  the other rates plus withheld_rate covers every question. Summaries of other agents, including every run committed
+  before this change, keep exactly their old rate keys.
+
+**Caveats.**
+- The reviewer can mislead the analyst: a wrong finding can push a correct answer to change (`broken_by_retry`).
+  The feedback instructions try to limit this, but they cannot guarantee it.
+- A retry roughly doubles the analyst's cost on that question, and every attempt adds a reviewer call. Report the
+  token split.
+- The reviewer reads docs/metrics.md and the answer format, which an ablated analyst (`ANALYST_DOCS=none`) does not
+  have. In the loop, the findings carry that knowledge back to the analyst. A pipeline gain over a bare analyst is
+  therefore partly a knowledge channel, not only error checking.
+
+**Shakedown findings.**
+- The first real retry was dev q010 in `pipeline-retry-test` (raw scope, no docs). Attempt 1 computed the late rate on
+  full timestamps (AL 23.93%) and was rejected. The retry corrected it (calendar dates, AL 21.41%, graded correct).
+- But the retry's text cited the earlier 23.93% and the reviewer ("I checked the reviewer's findings and agree with
+  them … lowered AL's rate from the earlier 23.93%"). The reviewer returned revise, with a medium `numbers` finding
+  for a figure no query in that attempt produced. The answer was withheld although it was correct: a
+  `blocked_correct`.
+- Cause: the analyst leaked loop context (the review and the earlier figure, which the feedback block now shows it)
+  into the answer meant for the stakeholder.
+- Fix: the stand-alone rule in the feedback instructions (step 4 above). The reviewer and its brief are unchanged.
+
+**Hidden runs.** Run each pipeline configuration on the hidden split once, with the acceptance criteria committed
+before the run (as for the reviewer's brief v2). Iterate on dev only.
+
+Dev shakedown (from the repo root, with the venv active):
+
+```
+python evals/run_eval.py --split dev --label pipeline-shakedown --questions q001,q013 --agent-cmd "python agent/pipeline.py"
+python evals/run_eval.py --split dev --label pipeline-v1 --agent-cmd "python agent/pipeline.py"
+```

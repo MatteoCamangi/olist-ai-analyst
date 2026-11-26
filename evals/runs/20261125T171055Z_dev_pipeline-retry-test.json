@@ -1,0 +1,129 @@
+{
+  "timestamp": "20261125T171055Z",
+  "split": "dev",
+  "label": "pipeline-retry-test",
+  "git_sha": "1ddbeea8f4a3f287cd6452e12e75c2ab1d8af7a1",
+  "git_dirty": false,
+  "agent_cmd": "python agent/pipeline.py",
+  "responses_dir": null,
+  "timeout": 300,
+  "n_questions": 1,
+  "rates": {
+    "dev": {
+      "questions": 1,
+      "answerable": 1,
+      "correct": 0,
+      "accuracy": 0.0,
+      "wrong_confident_rate": 0.0,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.0,
+      "withheld": 1,
+      "withheld_rate": 1.0
+    },
+    "all": {
+      "questions": 1,
+      "answerable": 1,
+      "correct": 0,
+      "accuracy": 0.0,
+      "wrong_confident_rate": 0.0,
+      "false_refusal_rate": 0.0,
+      "incomplete_refusal_rate": 0.0,
+      "format_error_rate": 0.0,
+      "withheld": 1,
+      "withheld_rate": 1.0
+    }
+  },
+  "usage": {
+    "input_tokens": 45732,
+    "output_tokens": 2697,
+    "tool_calls": 3
+  },
+  "agent_config": {
+    "model": "claude-sonnet-5-5",
+    "docs": "none",
+    "brief": "minimal",
+    "scope": "raw",
+    "reviewer_model": "claude-sonnet-5-5",
+    "pipeline_max_retries": 1
+  },
+  "pipeline": {
+    "first_attempt_correct": {
+      "n": 0,
+      "of": 1,
+      "rate": 0.0
+    },
+    "shipped": {
+      "n": 0,
+      "of": 1,
+      "rate": 0.0
+    },
+    "shipped_correct": {
+      "n": 0,
+      "of": 1,
+      "rate": 0.0
+    },
+    "shipped_wrong": {
+      "n": 0,
+      "of": 1,
+      "rate": 0.0
+    },
+    "shipped_other": {
+      "n": 0,
+      "of": 1,
+      "rate": 0.0
+    },
+    "blocked": {
+      "n": 1,
+      "of": 1,
+      "rate": 1.0
+    },
+    "blocked_correct": {
+      "n": 1,
+      "of": 1,
+      "rate": 1.0
+    },
+    "blocked_wrong": {
+      "n": 0,
+      "of": 1,
+      "rate": 0.0
+    },
+    "fixed_by_retry": {
+      "n": 0,
+      "of": 1,
+      "rate": 0.0
+    },
+    "broken_by_retry": {
+      "n": 0,
+      "of": 1,
+      "rate": 0.0
+    },
+    "analyst_failed": {
+      "n": 0,
+      "of": 1,
+      "rate": 0.0
+    },
+    "pipeline_failure": {
+      "n": 0,
+      "of": 1,
+      "rate": 0.0
+    },
+    "statuses": {
+      "needs_human_review": 1
+    },
+    "attempts": {
+      "2": 1
+    },
+    "tokens": {
+      "analyst": {
+        "input_tokens": 19675,
+        "output_tokens": 1332,
+        "tool_calls": 3
+      },
+      "reviewer": {
+        "input_tokens": 26057,
+        "output_tokens": 1365
+      }
+    }
+  }
+}

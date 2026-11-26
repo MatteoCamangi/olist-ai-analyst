@@ -26,7 +26,17 @@ Inspect one dev question with  python evals/show_detail.py <detail file> <id>.
 Usage: the agent may write one stderr line  USAGE {"input_tokens": n, "output_tokens": n, "tool_calls": n, ...}.
 The summary keeps the totals over all questions (failed calls included), never per-question figures.
 Agent configuration: if that line also holds "model", "docs", "brief" and "scope" (strings), the summary stores them once as
-agent_config, read from the first question only (null when absent, and with --responses-dir).
+agent_config, read from the first question only (null when absent, and with --responses-dir). "reviewer_model" and
+"pipeline_max_retries" are added when the agent reports them (the pipeline does).
+
+Pipeline: each agent call also gets a temp file in PIPELINE_RESULT_FILE (other agents ignore it). When the agent is
+agent/pipeline.py, it writes its side file there; the runner keeps it in the detail file only and adds a "pipeline"
+block to the summary (aggregates only, every split): the analyst's first attempt graded alone (the paired within-run
+baseline), what was shipped (correct / wrong / other), what was withheld (blocked_correct / blocked_wrong, graded on
+the withheld answer), fixed_by_retry, broken_by_retry, statuses, attempts and tokens split by analyst and reviewer.
+A withheld answer (status needs_human_review, marker printed) gets its own outcome "withheld" instead of a
+format_error, and pipeline summaries add "withheld" and "withheld_rate" to every split's rates. Summaries of other
+agents keep exactly their old rate keys.
 """
 import argparse
 import datetime as dt
@@ -47,6 +57,9 @@ ROOT = grader.ROOT
 RUNS = ROOT / "evals" / "runs"
 PAYLOAD_FIELDS = ("question", "answer_schema")  # the only entry fields the agent ever sees
 TRACE_ENV = "AGENT_TRACE_FILE"
+PIPELINE_ENV = "PIPELINE_RESULT_FILE"
+PIPELINE_CONFIG_KEYS = ("reviewer_model", "pipeline_max_retries")
+SHIPPED = ("approved", "approved_after_retry")
 USAGE_KEYS = ("input_tokens", "output_tokens", "tool_calls")
 CONFIG_KEYS = ("model", "docs", "brief", "scope")
 PER_RUN_ONLY = ("usage", "agent_config", "failed_early")  # kept per question in memory, stored only as one run-level value
@@ -81,28 +94,39 @@ def read_trace(path):
     return events
 
 
+def read_side_file(path):
+    """The pipeline's side file as a dict, or None (other agents never write it)."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def call_agent(cmd, entry, timeout):
-    """Return (stdout, stderr, trace). Raises AgentFailed(reason, stderr, trace) on a crash, timeout or empty output."""
+    """Return (stdout, stderr, trace, side). Raises AgentFailed(reason, stderr, trace, side) on a crash, timeout or
+    empty output. side is the pipeline's side file, or None."""
     with tempfile.TemporaryDirectory(prefix="agent_trace_") as tmp:
-        trace_path = Path(tmp) / "trace.jsonl"
+        trace_path, side_path = Path(tmp) / "trace.jsonl", Path(tmp) / "pipeline.json"
         try:
             proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True, start_new_session=True,
-                                    env={**os.environ, TRACE_ENV: str(trace_path)})
+                                    env={**os.environ, TRACE_ENV: str(trace_path), PIPELINE_ENV: str(side_path)})
         except OSError as exc:
-            raise AgentFailed(f"agent failed: {exc}", "", [])
+            raise AgentFailed(f"agent failed: {exc}", "", [], None)
         try:
             out, err = proc.communicate(payload(entry), timeout=timeout)
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)  # the whole session: shell and its children
             proc.communicate()
-            raise AgentFailed(f"agent failed: timeout after {timeout}s", "", read_trace(trace_path))
-        trace = read_trace(trace_path)
+            raise AgentFailed(f"agent failed: timeout after {timeout}s", "", read_trace(trace_path),
+                              read_side_file(side_path))
+        trace, side = read_trace(trace_path), read_side_file(side_path)
     if proc.returncode != 0:
-        raise AgentFailed(f"agent failed: exit code {proc.returncode}", err, trace)
+        raise AgentFailed(f"agent failed: exit code {proc.returncode}", err, trace, side)
     if not out.strip():
-        raise AgentFailed("agent failed: empty output", err, trace)
-    return out, err, trace
+        raise AgentFailed("agent failed: empty output", err, trace, side)
+    return out, err, trace, side
 
 
 def parse_usage(stderr):
@@ -125,7 +149,9 @@ def parse_agent_config(stderr):
         except json.JSONDecodeError:
             continue
         if isinstance(data, dict) and all(isinstance(data.get(k), str) and data[k] for k in CONFIG_KEYS):
-            return {k: data[k] for k in CONFIG_KEYS}
+            config = {k: data[k] for k in CONFIG_KEYS}
+            config.update({k: data[k] for k in PIPELINE_CONFIG_KEYS if k in data})
+            return config
     return None
 
 
@@ -155,13 +181,16 @@ def failed_result(entry, reason):
 
 def run_one(args, entry):
     start = time.monotonic()
-    response, stderr, trace, failed = None, "", None, None
+    response, stderr, trace, failed, side = None, "", None, None, None
     try:
         if args.responses_dir:
             response, stderr = read_response(args.responses_dir, entry)
         else:
-            response, stderr, trace = call_agent(args.agent_cmd, entry, args.timeout)
+            response, stderr, trace, side = call_agent(args.agent_cmd, entry, args.timeout)
         result = grader.grade(entry, response)
+        if side and side.get("status") == "needs_human_review":
+            result = {**result, "outcome": "withheld", "correct": False,
+                      "reasons": ["withheld by the pipeline (needs_human_review)"]}
     except AgentFailed as exc:
         failed = exc.args[0]
         result = failed_result(entry, exc.args[0])
@@ -169,12 +198,74 @@ def run_one(args, entry):
             stderr = exc.args[1] or ""
         if len(exc.args) > 2:
             trace = exc.args[2]
+        if len(exc.args) > 3:
+            side = exc.args[3]
     usage = parse_usage(stderr)
     tokens = (usage["input_tokens"] + usage["output_tokens"]) if usage else 0
     return {"result": result, "response": response, "trace": trace, "stderr_tail": (stderr or "")[-2000:],
             "seconds": round(time.monotonic() - start, 2), "usage": usage,
             "agent_config": parse_agent_config(stderr),
-            "failed_early": bool(failed) and not failed.startswith("agent failed: timeout") and tokens == 0}
+            "failed_early": bool(failed) and not failed.startswith("agent failed: timeout") and tokens == 0,
+            "pipeline": side, "pipeline_outcomes": pipeline_outcomes(entry, side)}
+
+
+def pipeline_outcomes(entry, side):
+    """Grader outcomes of a pipeline side file: first attempt, and the shipped or the withheld answer."""
+    if not side:
+        return None
+    attempts = side.get("attempts") or []
+    first = attempts[0].get("response") if attempts else None
+    out = {"status": side.get("status"), "attempts": len(attempts),
+           "first": grader.grade(entry, first or "")["outcome"], "shipped": None, "withheld": None}
+    if side.get("status") in SHIPPED:
+        out["shipped"] = grader.grade(entry, side.get("shipped_response") or "")["outcome"]
+    elif side.get("status") == "needs_human_review":
+        answer = (side.get("handoff") or {}).get("answer")
+        out["withheld"] = grader.grade(entry, answer or "")["outcome"]
+    return out
+
+
+def pipeline_block(items):
+    """Aggregates over a pipeline run (None when no item has a side file). Counts only, never ids."""
+    if not any(i.get("pipeline") for i in items):
+        return None
+    n = len(items)
+    c = dict.fromkeys(("first_attempt_correct", "shipped", "shipped_correct", "shipped_wrong", "shipped_other",
+                       "blocked", "blocked_correct", "blocked_wrong", "fixed_by_retry", "broken_by_retry",
+                       "analyst_failed", "pipeline_failure"), 0)
+    statuses, attempts = {}, {}
+    tokens = {"analyst": {"input_tokens": 0, "output_tokens": 0, "tool_calls": 0},
+              "reviewer": {"input_tokens": 0, "output_tokens": 0}}
+    for i in items:
+        o, side = i.get("pipeline_outcomes"), i.get("pipeline")
+        if not o:
+            c["pipeline_failure"] += 1
+            continue
+        statuses[o["status"]] = statuses.get(o["status"], 0) + 1
+        attempts[str(o["attempts"])] = attempts.get(str(o["attempts"]), 0) + 1
+        for stage, keys in tokens.items():
+            for k in keys:
+                v = ((side.get("tokens") or {}).get(stage) or {}).get(k)
+                keys[k] += v if isinstance(v, int) else 0
+        first_ok = o["first"] == "correct"
+        c["first_attempt_correct"] += first_ok
+        shipped_ok = o["shipped"] == "correct"
+        if o["status"] in SHIPPED:
+            c["shipped"] += 1
+            c["shipped_correct"] += shipped_ok
+            c["shipped_wrong"] += o["shipped"] == "wrong_confident"
+            c["shipped_other"] += o["shipped"] not in ("correct", "wrong_confident")
+        elif o["status"] == "needs_human_review":
+            c["blocked"] += 1
+            c["blocked_correct"] += o["withheld"] == "correct"
+            c["blocked_wrong"] += o["withheld"] != "correct"
+        else:
+            c["analyst_failed"] += 1
+        c["fixed_by_retry"] += (not first_ok) and shipped_ok
+        c["broken_by_retry"] += first_ok and not shipped_ok
+    rated = {k: {"n": v, "of": n, "rate": round(v / n, 4) if n else None} for k, v in c.items()}
+    return {**rated, "statuses": dict(sorted(statuses.items())), "attempts": dict(sorted(attempts.items())),
+            "tokens": tokens}
 
 
 def last_message(stderr):
@@ -199,6 +290,15 @@ def rates_only(summary):
     return {split: {k: v for k, v in s.items() if k in RATE_KEYS} for split, s in summary.items()}
 
 
+def add_withheld(rates, results):
+    """Pipeline runs only: the count and rate of withheld answers per split (same denominator as accuracy)."""
+    for split, r in rates.items():
+        rs = results if split == "all" else [x for x in results if x["split"] == split]
+        n = sum(x["outcome"] == "withheld" for x in rs)
+        r["withheld"], r["withheld_rate"] = n, round(n / len(rs), 4) if rs else None
+    return rates
+
+
 def earlier_hidden_runs(runs_dir):
     n = 0
     for p in Path(runs_dir).glob("*.json"):
@@ -220,9 +320,12 @@ def run_name(runs_dir, split, label):
 
 def print_rates(summary):
     for split, s in summary.items():
-        print(f"[{split}] questions {s['questions']}  correct {s['correct']}  accuracy {s['accuracy']}  "
-              f"wrong_confident {s['wrong_confident_rate']}  false_refusal {s['false_refusal_rate']}  "
-              f"incomplete_refusal {s['incomplete_refusal_rate']}  format_error {s['format_error_rate']}")
+        line = (f"[{split}] questions {s['questions']}  correct {s['correct']}  accuracy {s['accuracy']}  "
+                f"wrong_confident {s['wrong_confident_rate']}  false_refusal {s['false_refusal_rate']}  "
+                f"incomplete_refusal {s['incomplete_refusal_rate']}  format_error {s['format_error_rate']}")
+        if "withheld_rate" in s:
+            line += f"  withheld {s['withheld_rate']}"
+        print(line)
 
 
 def select(questions, args, parser):
@@ -286,6 +389,10 @@ def main(argv=None):
                "timeout": args.timeout, "n_questions": len(entries), "rates": rates_only(full),
                "usage": None if args.responses_dir else usage_totals(items),
                "agent_config": items[0]["agent_config"] if items else None}
+    pipe = pipeline_block(items)
+    if pipe is not None:
+        summary["pipeline"] = pipe
+        add_withheld(summary["rates"], results)
     if args.split != "dev":
         summary["earlier_hidden_runs"] = earlier_hidden_runs(runs_dir)
     detail = {**summary, "summary": full,
@@ -306,7 +413,18 @@ def main(argv=None):
               f"tool_calls {u['tool_calls']}")
     if summary["agent_config"] is not None:
         c = summary["agent_config"]
-        print(f"agent_config: model {c['model']}  docs {c['docs']}  brief {c['brief']}  scope {c['scope']}")
+        line = f"agent_config: model {c['model']}  docs {c['docs']}  brief {c['brief']}  scope {c['scope']}"
+        if "reviewer_model" in c or "pipeline_max_retries" in c:
+            line += f"  reviewer_model {c.get('reviewer_model')}  pipeline_max_retries {c.get('pipeline_max_retries')}"
+        print(line)
+    if "pipeline" in summary:
+        pb = summary["pipeline"]
+        print("pipeline: " + "  ".join(f"{k} {pb[k]['n']}/{pb[k]['of']}" for k in (
+            "first_attempt_correct", "shipped_correct", "shipped_wrong", "blocked_correct", "blocked_wrong",
+            "fixed_by_retry", "broken_by_retry")))
+        t = pb["tokens"]
+        print(f"pipeline tokens: analyst {t['analyst']['input_tokens']}+{t['analyst']['output_tokens']}  "
+              f"reviewer {t['reviewer']['input_tokens']}+{t['reviewer']['output_tokens']}")
     if show_ids:
         manual = full["all"]["manual_review"]
         print(f"manual_review: {', '.join(manual) if manual else 'none'}")

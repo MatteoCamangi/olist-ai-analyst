@@ -15,6 +15,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import test_grader  # noqa: E402
 from test_grader import Q, assert_no_leak, correct_responses  # noqa: E402
+import run_eval  # noqa: E402
 
 RUNNER = HERE / "run_eval.py"
 SHOW = HERE / "show_detail.py"
@@ -97,6 +98,32 @@ with open(path, "a") as f:
     f.write(json.dumps({"event": "tool_result", "tool_use_id": "tu_1", "content": path, "is_error": False}) + "\\n")
     f.write("not json TRACE-MARKER-7f3a\\n")
 print(json.loads((Path(__file__).parent / "responses.json").read_text())[q["question"]])
+""",
+    "pipe": """
+import json, os, sys
+from pathlib import Path
+here = Path(__file__).parent
+q = json.loads(sys.stdin.read())
+answer = json.loads((here / "responses.json").read_text())[q["question"]]
+counter = here / "pipe.count"
+n = int(counter.read_text()) if counter.exists() else 0
+counter.write_text(str(n + 1))
+withheld = n % 3 == 2  # every third question is withheld (its answer is correct: a false block)
+side = {"config": {}, "status": "needs_human_review" if withheld else "approved",
+        "attempts": [{"attempt": 1, "response": answer, "analyst_exit": 0, "review": None, "tokens": {}}],
+        "shipped_response": None if withheld else answer, "withheld": withheld,
+        "handoff": {"answer": answer, "queries": [], "findings": []} if withheld else None,
+        "stakeholder_message": "withheld" if withheld else None,
+        "tokens": {"analyst": {"input_tokens": 5, "output_tokens": 2, "tool_calls": 1},
+                   "reviewer": {"input_tokens": 3, "output_tokens": 1}}}
+Path(os.environ["PIPELINE_RESULT_FILE"]).write_text(json.dumps(side))
+if withheld:
+    print(json.dumps({"status": "needs_human_review", "withheld": True, "stakeholder_message": "withheld"}))
+else:
+    print(answer)
+print('USAGE ' + json.dumps({"input_tokens": 8, "output_tokens": 3, "tool_calls": 1, "model": "claude-a",
+                             "docs": "full", "brief": "full", "scope": "marts", "reviewer_model": "claude-r",
+                             "pipeline_max_retries": 1}), file=sys.stderr)
 """,
     "trace_crasher": """
 import json, os, sys
@@ -542,6 +569,82 @@ def test_summary_leak_check_exempts_only_sha_and_timestamp(env):
                 continue
             raise AssertionError(f"an expected value in summary field {key!r} was not caught")
     assert {"rates", "usage", "agent_config", "label", "agent_cmd"} <= set(summary) - set(LEAK_EXEMPT)
+
+
+def _side(status, attempts, shipped=None, withheld=None):
+    return {"status": status, "attempts": [{"attempt": n + 1, "response": r} for n, r in enumerate(attempts)],
+            "shipped_response": shipped, "handoff": {"answer": withheld} if withheld is not None else None,
+            "tokens": {"analyst": {"input_tokens": 10, "output_tokens": 1, "tool_calls": 2},
+                       "reviewer": {"input_tokens": 4, "output_tokens": 1}}}
+
+
+def test_pipeline_block_metrics():
+    entry = Q["q001"]
+    right = next(t for _, t in correct_responses(entry))
+    wrong = test_grader.response(answer={k: v * 2 for k, v in entry["expected"].items()})
+    assert run_eval.grader.grade(entry, right)["outcome"] == "correct"
+    assert run_eval.grader.grade(entry, wrong)["outcome"] == "wrong_confident"
+    sides = {
+        "A": _side("approved", [right], shipped=right),
+        "B": _side("approved_after_retry", [wrong, right], shipped=right),        # fixed by retry
+        "C": _side("approved_after_retry", [right, wrong], shipped=wrong),        # broken by retry, shipped wrong
+        "D": _side("needs_human_review", [wrong, wrong], withheld=wrong),         # caught
+        "E": _side("needs_human_review", [right, right], withheld=right),         # false block, broken
+        "F": _side("approved", [wrong], shipped=wrong),                          # shipped wrong
+        "G": _side("analyst_failed", [None]),
+        "H": None,                                                               # pipeline crashed, no side file
+    }
+    items = [{"pipeline": side, "pipeline_outcomes": run_eval.pipeline_outcomes(entry, side)} for side in sides.values()]
+    b = run_eval.pipeline_block(items)
+    counts = {k: v["n"] for k, v in b.items() if isinstance(v, dict) and "n" in v}
+    assert counts == {"first_attempt_correct": 3, "shipped": 4, "shipped_correct": 2, "shipped_wrong": 2,
+                      "shipped_other": 0, "blocked": 2, "blocked_correct": 1, "blocked_wrong": 1,
+                      "fixed_by_retry": 1, "broken_by_retry": 2, "analyst_failed": 1, "pipeline_failure": 1}, counts
+    assert all(v["of"] == 8 for v in b.values() if isinstance(v, dict) and "of" in v)
+    assert b["statuses"] == {"analyst_failed": 1, "approved": 2, "approved_after_retry": 2, "needs_human_review": 2}
+    assert b["attempts"] == {"1": 3, "2": 4}
+    assert b["tokens"] == {"analyst": {"input_tokens": 70, "output_tokens": 7, "tool_calls": 14},
+                           "reviewer": {"input_tokens": 28, "output_tokens": 7}}
+    assert run_eval.pipeline_block([{"pipeline": None, "pipeline_outcomes": None}]) is None  # not a pipeline run
+
+
+@with_env
+def test_pipeline_run_summary(env):
+    n_dev = sum(e["split"] == "dev" for e in Q.values())
+    p = env.run("--split", "dev", "--label", "pipe", agent="pipe")
+    ok(p, "pipe")
+    summary, detail = env.latest(p)
+    pb = summary["pipeline"]
+    withheld = n_dev // 3
+    assert pb["first_attempt_correct"] == {"n": n_dev, "of": n_dev, "rate": 1.0}
+    assert pb["shipped_correct"]["n"] == n_dev - withheld and pb["blocked_correct"]["n"] == withheld
+    assert pb["broken_by_retry"]["n"] == withheld and pb["fixed_by_retry"]["n"] == 0 and pb["shipped_wrong"]["n"] == 0
+    assert pb["statuses"] == {"approved": n_dev - withheld, "needs_human_review": withheld}
+    dev = summary["rates"]["dev"]
+    assert dev["format_error_rate"] == 0.0, "a withheld marker is not a format error"
+    assert dev["withheld"] == withheld and dev["withheld_rate"] == round(withheld / n_dev, 4)
+    assert dev["accuracy"] == round((n_dev - withheld) / n_dev, 4)
+    assert set(dev) == set(run_eval.RATE_KEYS) | {"withheld", "withheld_rate"}
+    outcomes = [q["result"]["outcome"] for q in detail["questions"]]
+    assert outcomes.count("withheld") == withheld and "format_error" not in outcomes
+    assert "withheld" in p.stdout
+    assert summary["agent_config"]["reviewer_model"] == "claude-r" and summary["agent_config"]["pipeline_max_retries"] == 1
+    assert pb["tokens"]["reviewer"] == {"input_tokens": 3 * n_dev, "output_tokens": n_dev}
+    assert all(q["pipeline"]["status"] for q in detail["questions"]), "side files kept in the detail file"
+    assert "pipeline:" in p.stdout and "pipeline tokens:" in p.stdout
+    p = env.run("--split", "all", "--label", "pipe-all", "--confirm-hidden", agent="pipe")
+    ok(p, "pipe all")
+    summary, detail = env.latest(p)
+    assert "pipeline" in summary and set(summary["pipeline"]["statuses"]) <= {"approved", "needs_human_review"}
+    text = json.dumps(summary)
+    assert not ID.search(text) and not ID.search(p.stdout), "ids in a hidden pipeline summary"
+    assert "shipped_response" not in text and "handoff" not in text and "stakeholder_message" not in text
+    assert_summary_no_leak(summary, "pipeline all summary")
+    assert all(set(r) == set(run_eval.RATE_KEYS) | {"withheld", "withheld_rate"} for r in summary["rates"].values())
+    p = env.run("--split", "dev", "--label", "plain", "--questions", "q001", agent="perfect")  # non-pipeline: no block
+    ok(p, "perfect")
+    plain = env.latest(p)[0]
+    assert "pipeline" not in plain and all(set(r) == set(run_eval.RATE_KEYS) for r in plain["rates"].values())
 
 
 def test_hidden_values_list_is_not_empty():
