@@ -73,7 +73,10 @@ How to use this feedback:
 - Verify each finding with your own queries before changing anything.
 - Do not copy any number from the previous attempt or from the findings: use only numbers you compute yourself in this
   conversation.
-- If a finding is wrong, say so and keep your answer.
+- Your new answer must stand on its own for the person who asked the question. Do not mention the review, a
+  reviewer, an earlier attempt, a previous answer or any earlier figure. Do not include any number that your
+  own queries in this attempt did not produce. If you disagree with a finding, keep your answer and explain it
+  only in terms of the data and the metric definition.
 Then answer the question again in the required format."""
 
 STAKEHOLDER_TEMPLATE = ("We could not produce a verified answer to this question. {runs} and the automated review "

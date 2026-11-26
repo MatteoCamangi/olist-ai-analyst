@@ -196,8 +196,11 @@ answer on stdout), so `run_eval.py --agent-cmd "python agent/pipeline.py"` measu
    with a feedback block appended to its user message (`ANALYST_FEEDBACK_FILE`; the system prompt never changes).
    The block holds the previous attempt's SQL queries (numbered the way the findings cite them, without results),
    its final response, the findings (check, severity, evidence, fix), and instructions: the findings refer to that
-   attempt; verify each finding with your own queries; do not copy any number you did not compute; if a finding is
-   wrong, say so and keep your answer. The new answer is reviewed again. Approved → `approved_after_retry`.
+   attempt; verify each finding with your own queries; do not copy any number you did not compute; and the new answer
+   must stand on its own for the person who asked: no mention of the review, a reviewer, an earlier attempt, a
+   previous answer or any earlier figure, no number that the attempt's own queries did not produce, and any
+   disagreement with a finding explained only in terms of the data and the metric definition. The new answer is
+   reviewed again. Approved → `approved_after_retry`.
 5. Otherwise the answer is **withheld** (`needs_human_review`). The pipeline fails closed: a reviewer format error or
    failure, or a failed retry, also withholds the answer.
 
@@ -252,6 +255,17 @@ How to read them:
 - The reviewer reads docs/metrics.md and the answer format, which an ablated analyst (`ANALYST_DOCS=none`) does not
   have. In the loop, the findings carry that knowledge back to the analyst. A pipeline gain over a bare analyst is
   therefore partly a knowledge channel, not only error checking.
+
+**Shakedown findings.**
+- The first real retry was dev q010 in `pipeline-retry-test` (raw scope, no docs). Attempt 1 computed the late rate on
+  full timestamps (AL 23.93%) and was rejected. The retry corrected it (calendar dates, AL 21.41%, graded correct).
+- But the retry's text cited the earlier 23.93% and the reviewer ("I checked the reviewer's findings and agree with
+  them … lowered AL's rate from the earlier 23.93%"). The reviewer returned revise, with a medium `numbers` finding
+  for a figure no query in that attempt produced. The answer was withheld although it was correct: a
+  `blocked_correct`.
+- Cause: the analyst leaked loop context (the review and the earlier figure, which the feedback block now shows it)
+  into the answer meant for the stakeholder.
+- Fix: the stand-alone rule in the feedback instructions (step 4 above). The reviewer and its brief are unchanged.
 
 **Hidden runs.** Run each pipeline configuration on the hidden split once, with the acceptance criteria committed
 before the run (as for the reviewer's brief v2). Iterate on dev only.

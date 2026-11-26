@@ -151,7 +151,7 @@ def test_revise_retry_approve(env):
     fb = calls[1]["feedback"]
     for part in ("check: numbers", "severity: high", 'evidence: query 1 and "625"', "fix: Recompute the count.",
                  "The findings below refer to that attempt", "Verify each finding with your own queries",
-                 "Do not copy any number", "If a finding is wrong, say so and keep your answer",
+                 "Do not copy any number",
                  "Query 1:\n```sql\nSELECT 1 AS n\n```", ANSWER_1.strip()):
         assert part in fb, part
     assert "(1 row)" not in fb and "n\n1\n" not in fb, "query results are not part of the feedback"
@@ -159,6 +159,23 @@ def test_revise_retry_approve(env):
     u = usage_of(err)
     assert (u["analyst_input_tokens"], u["reviewer_input_tokens"], u["input_tokens"]) == (2000, 600, 2600)
     assert (u["analyst_output_tokens"], u["reviewer_output_tokens"], u["tool_calls"]) == (200, 60, 2)
+
+
+STAND_ALONE = ("Your new answer must stand on its own for the person who asked the question. Do not mention the "
+               "review, a reviewer, an earlier attempt, a previous answer or any earlier figure. Do not include any "
+               "number that your own queries in this attempt did not produce. If you disagree with a finding, keep your "
+               "answer and explain it only in terms of the data and the metric definition.")
+
+
+@with_plan({"analyst": [ANSWER_1, ANSWER_2], "reviews": [review("revise", FINDING), review("approve")]})
+def test_feedback_has_stand_alone_rule(env):
+    code, _, _, _ = env.run()
+    assert code == 0
+    fb = env.log("analyst.log")[1]["feedback"]
+    assert STAND_ALONE in " ".join(fb.split()), "the stand-alone instruction, word for word"
+    assert "say so and keep your answer" not in fb, "the old instruction is gone"
+    unit = " ".join(pipeline.feedback_text([FINDING], ANSWER_1, []).split())
+    assert STAND_ALONE in unit and "Verify each finding with your own queries" in unit
 
 
 @with_plan({"analyst": [ANSWER_1, ANSWER_2],
